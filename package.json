@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "serve src"
+    "start": "serve src",
+    "build": "your-build-command-here"
   },
   "dependencies": {
     "serve": "^14.0.0"
   }
-} 
+}
