@@ -71,25 +71,23 @@
 
       .detection-box {
         position: absolute;
-        border: 4px solid #ff0000;
+        border: 3px solid #00ff00;
         pointer-events: none;
-        box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
+        box-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
         z-index: 1000;
-        background-color: rgba(255, 0, 0, 0.2);
       }
 
       .detection-label {
         position: absolute;
-        background: rgba(0, 0, 0, 0.9);
-        color: #ff0000;
+        background: rgba(0, 0, 0, 0.8);
+        color: #00ff00;
         padding: 4px 8px;
-        font-size: 16px;
+        font-size: 14px;
         font-weight: bold;
         border-radius: 4px;
         pointer-events: none;
         z-index: 1001;
         white-space: nowrap;
-        box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
       }
     </style>
   </head>
@@ -221,9 +219,6 @@
 
               if (receivedChunks === expectedChunks) {
                 try {
-                  // Clear previous detections before processing new frame
-                  clearDetections();
-
                   const fullFrame = new Uint8Array(
                     currentFrame.reduce((acc, chunk) => acc + chunk.length, 0)
                   );
@@ -236,36 +231,27 @@
                   });
 
                   const blob = new Blob([fullFrame], { type: "image/jpeg" });
-                  console.log("Frame fully received, size:", blob.size);
 
-                  // First display the image
+                  const detectionResult = await detectObjects(blob);
+                  if (detectionResult && detectionResult.status === "success") {
+                    document.querySelector("#videoContainer").__lastDetections =
+                      detectionResult.detections;
+                    drawDetections(detectionResult.detections);
+                  }
+
                   const url = URL.createObjectURL(blob);
                   const img = new Image();
-
-                  img.onload = async () => {
+                  img.onload = () => {
                     canvas.width = img.width;
                     canvas.height = img.height;
                     ctx.drawImage(img, 0, 0);
                     URL.revokeObjectURL(url);
-
-                    // Detect objects and draw new boxes
-                    const detectionResult = await detectObjects(blob);
-                    if (
-                      detectionResult &&
-                      detectionResult.status === "success"
-                    ) {
-                      drawDetections(detectionResult.detections);
-                      status.textContent = "Detección completada";
-                    } else {
-                      status.textContent = "Error en la detección";
-                    }
+                    status.textContent = "Frame procesado correctamente";
                   };
-
                   img.onerror = (err) => {
                     console.error("Error al cargar la imagen:", err);
                     status.textContent = "Error al mostrar el frame";
                   };
-
                   img.src = url;
                 } catch (err) {
                   console.error("Error procesando frame:", err);
@@ -301,16 +287,49 @@
       async function detectObjects(imageBlob) {
         const formData = new FormData();
 
-        // Log the original image size
-        console.log("Original image size:", imageBlob.size, "bytes");
+        try {
+          const img = new Image();
+          img.src = URL.createObjectURL(imageBlob);
+          await new Promise((resolve) => (img.onload = resolve));
+
+          const canvas = document.createElement("canvas");
+          const MAX_SIZE = 800; // Maximum dimension
+
+          let width = img.width;
+          let height = img.height;
+
+          // Scale down if image is too large
+          if (width > MAX_SIZE || height > MAX_SIZE) {
+            if (width > height) {
+              height = (height * MAX_SIZE) / width;
+              width = MAX_SIZE;
+            } else {
+              width = (width * MAX_SIZE) / height;
+              height = MAX_SIZE;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              formData.append("image", blob);
+            },
+            "image/jpeg",
+            0.9
+          );
+
+          URL.revokeObjectURL(img.src);
+        } catch (error) {
+          console.error("Error resizing image:", error);
+          formData.append("image", imageBlob); // Fall back to original image
+        }
 
         try {
-          // Create a direct copy of the blob for sending
-          formData.append("image", imageBlob);
-
-          // Log that we're sending the request
-          console.log("Sending detection request to server...");
-
           const response = await fetch(
             "http://concrete-monkey-selected.ngrok-free.app/detect",
             {
@@ -325,21 +344,6 @@
 
           const result = await response.json();
           console.log("Detection result:", result); // Debug log
-
-          // Log more details about detections
-          if (result.detections && result.detections.length > 0) {
-            console.log(`Found ${result.detections.length} objects:`);
-            result.detections.forEach((det, i) => {
-              console.log(
-                `  ${i + 1}. ${det.class} (${det.confidence.toFixed(
-                  2
-                )}) at [${det.bbox.join(", ")}]`
-              );
-            });
-          } else {
-            console.log("No objects detected");
-          }
-
           return result;
         } catch (error) {
           console.error("Error en la detección:", error);
@@ -347,36 +351,23 @@
         }
       }
 
-      function clearDetections() {
-        // Remove all existing detection boxes and labels from the document
-        const boxes = document.querySelectorAll(".detection-box");
-        const labels = document.querySelectorAll(".detection-label");
-
-        boxes.forEach((box) => box.remove());
-        labels.forEach((label) => label.remove());
-      }
-
       function drawDetections(detections) {
-        // Clear all previous detections first
-        clearDetections();
-
-        // Check if we have any detections
-        if (!detections || detections.length === 0) {
-          console.log("No detections to draw");
-          return;
-        }
-
-        console.log(`Drawing ${detections.length} detection boxes`);
-
+        const container = document.getElementById("videoContainer");
         const canvas = document.getElementById("videoCanvas");
-        const rect = canvas.getBoundingClientRect();
+
+        // Remove previous detection boxes
+        const oldBoxes = container.getElementsByClassName("detection-box");
+        const oldLabels = container.getElementsByClassName("detection-label");
+        while (oldBoxes.length > 0) oldBoxes[0].remove();
+        while (oldLabels.length > 0) oldLabels[0].remove();
 
         // Get the actual dimensions of the displayed image
+        const rect = canvas.getBoundingClientRect();
         const scaleX = rect.width / canvas.width;
         const scaleY = rect.height / canvas.height;
 
         // Draw new detection boxes
-        detections.forEach((detection, index) => {
+        detections.forEach((detection) => {
           const [x1, y1, x2, y2] = detection.bbox;
           const confidence = Math.round(detection.confidence * 100);
 
@@ -386,26 +377,23 @@
           const scaledX2 = x2 * scaleX;
           const scaledY2 = y2 * scaleY;
 
-          // Create box with absolute positioning
+          // Create box
           const box = document.createElement("div");
           box.className = "detection-box";
-          box.style.position = "absolute";
           box.style.left = `${rect.left + scaledX1}px`;
           box.style.top = `${rect.top + scaledY1}px`;
           box.style.width = `${scaledX2 - scaledX1}px`;
           box.style.height = `${scaledY2 - scaledY1}px`;
 
-          // Create label with absolute positioning
+          // Create label
           const label = document.createElement("div");
           label.className = "detection-label";
-          label.style.position = "absolute";
           label.style.left = `${rect.left + scaledX1}px`;
-          label.style.top = `${rect.top + scaledY1 - 25}px`;
+          label.style.top = `${rect.top + scaledY1 - 20}px`;
           label.textContent = `${detection.class} ${confidence}%`;
 
-          // Add to document
-          document.body.appendChild(box);
-          document.body.appendChild(label);
+          container.appendChild(box);
+          container.appendChild(label);
         });
       }
 
@@ -434,7 +422,6 @@
           const lastDetections =
             document.querySelector("#videoContainer").__lastDetections;
           if (lastDetections) {
-            clearDetections();
             drawDetections(lastDetections);
           }
         }, 250);
