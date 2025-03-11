@@ -26,12 +26,12 @@
     </div>
 
     <script>
-      const client = mqtt.connect("wss://broker.hivemq.com:8884", {
+      const client = mqtt.connect("ws://broker.hivemq.com:8000", {
         clientId: "viewer_" + Math.random().toString(16).substr(2, 8),
-        protocol: "wss",
-        keepalive: 30,
-        connectTimeout: 10000,
-        reconnectPeriod: 2000,
+        protocol: "ws",
+        keepalive: 60,
+        connectTimeout: 30000,
+        reconnectPeriod: 5000,
         clean: true,
         qos: 0,
         rejectUnauthorized: false,
