@@ -22,10 +22,11 @@
     <div id="videoContainer">
       <canvas id="videoCanvas"></canvas>
       <p id="status">Conectando...</p>
+      <button id="reconnectButton" style="display: none">Reconectar</button>
     </div>
 
     <script>
-      const client = mqtt.connect("wss://test.mosquitto.org:8081", {
+      const client = mqtt.connect("wss://broker.hivemq.com:8884", {
         clientId: "viewer_" + Math.random().toString(16).substr(2, 8),
         protocol: "wss",
         keepalive: 30,
@@ -45,6 +46,7 @@
       const canvas = document.getElementById("videoCanvas");
       const ctx = canvas.getContext("2d");
       const status = document.getElementById("status");
+      const reconnectButton = document.getElementById("reconnectButton");
 
       let currentFrame = [];
       let expectedChunks = 0;
@@ -59,9 +61,13 @@
         }
       }, 15000);
 
+      console.log("Intentando conectar a MQTT...");
+
       client.on("connect", () => {
         clearTimeout(connectionTimeout);
         console.log("Conectado al broker MQTT");
+        console.log("Client ID:", client.options.clientId);
+        console.log("Broker URL:", client.options.hostname);
         status.textContent = "Conectado al broker MQTT, esperando stream...";
 
         const topics = [
@@ -82,9 +88,16 @@
         });
       });
 
+      reconnectButton.addEventListener("click", () => {
+        status.textContent = "Reconectando manualmente...";
+        client.end(true);
+        location.reload();
+      });
+
       client.on("close", () => {
         console.log("Desconectado del broker MQTT");
         status.textContent = "Desconectado del broker MQTT. Reconectando...";
+        reconnectButton.style.display = "block";
       });
 
       client.on("message", (topic, message) => {
