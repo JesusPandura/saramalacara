@@ -300,22 +300,20 @@
 
       async function detectObjects(imageBlob) {
         const formData = new FormData();
-
-        // Log the original image size
         console.log("Original image size:", imageBlob.size, "bytes");
 
         try {
-          // Create a direct copy of the blob for sending
           formData.append("image", imageBlob);
-
-          // Log that we're sending the request
           console.log("Sending detection request to server...");
 
           const response = await fetch(
-            "http://concrete-monkey-selected.ngrok-free.app/detect",
+            "https://concrete-monkey-selected.ngrok-free.app/detect",
             {
               method: "POST",
               body: formData,
+              headers: {
+                Accept: "application/json",
+              },
             }
           );
 
@@ -324,9 +322,8 @@
           }
 
           const result = await response.json();
-          console.log("Detection result:", result); // Debug log
+          console.log("Detection result:", result);
 
-          // Log more details about detections
           if (result.detections && result.detections.length > 0) {
             console.log(`Found ${result.detections.length} objects:`);
             result.detections.forEach((det, i) => {
@@ -343,6 +340,11 @@
           return result;
         } catch (error) {
           console.error("Error en la detección:", error);
+          console.error("Error details:", {
+            message: error.message,
+            stack: error.stack,
+            type: error.name,
+          });
           return null;
         }
       }
