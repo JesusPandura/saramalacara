@@ -28,58 +28,67 @@
       const client = mqtt.connect("wss://test.mosquitto.org:8081", {
         clientId: "viewer_" + Math.random().toString(16).substr(2, 8),
         protocol: "wss",
-        keepalive: 60,
-        connectTimeout: 4000,
-        reconnectPeriod: 1000,
+        keepalive: 30,
+        connectTimeout: 10000,
+        reconnectPeriod: 2000,
         clean: true,
-        qos: 1,
+        qos: 0,
+        rejectUnauthorized: false,
+        will: {
+          topic: "esp32cam/stream/status",
+          payload: "Viewer disconnected",
+          qos: 0,
+          retain: false,
+        },
       });
+
       const canvas = document.getElementById("videoCanvas");
       const ctx = canvas.getContext("2d");
       const status = document.getElementById("status");
-
-      console.log("Iniciando conexión MQTT...");
 
       let currentFrame = [];
       let expectedChunks = 0;
       let receivedChunks = 0;
       let deviceId = null;
 
+      let connectionTimeout = setTimeout(() => {
+        if (!client.connected) {
+          status.textContent = "Timeout de conexión. Reintentando...";
+          client.end(true);
+          location.reload();
+        }
+      }, 15000);
+
       client.on("connect", () => {
+        clearTimeout(connectionTimeout);
         console.log("Conectado al broker MQTT");
         status.textContent = "Conectado al broker MQTT, esperando stream...";
-        const topic = "esp32cam/stream/#";
-        console.log("Intentando suscribirse a:", topic);
 
-        client.subscribe(topic, (err) => {
-          if (err) {
-            console.error("Error al suscribirse:", err);
-            status.textContent = "Error al suscribirse: " + err.message;
-          } else {
-            console.log("Suscrito exitosamente a:", topic);
-            status.textContent = "Suscrito y esperando imágenes...";
-          }
+        const topics = [
+          "esp32cam/stream/#",
+          "esp32cam/+/metadata",
+          "esp32cam/+/frame/#",
+        ];
+
+        topics.forEach((topic) => {
+          client.subscribe(topic, { qos: 0 }, (err) => {
+            if (err) {
+              console.error("Error al suscribirse a " + topic + ":", err);
+              status.textContent = "Error al suscribirse: " + err.message;
+            } else {
+              console.log("Suscrito a:", topic);
+            }
+          });
         });
-      });
-
-      client.on("connect_error", (error) => {
-        console.error("Error de conexión MQTT:", error);
-        status.textContent = "Error de conexión: " + error.message;
-      });
-
-      client.on("connect_timeout", () => {
-        console.error("Timeout en la conexión MQTT");
-        status.textContent = "Timeout en la conexión";
       });
 
       client.on("close", () => {
         console.log("Desconectado del broker MQTT");
-        status.textContent = "Desconectado del broker MQTT";
+        status.textContent = "Desconectado del broker MQTT. Reconectando...";
       });
 
       client.on("message", (topic, message) => {
-        console.log(`Mensaje recibido en ${topic}`);
-        console.log(`Tamaño del mensaje: ${message.length} bytes`);
+        console.log(`Mensaje en ${topic} (${message.length} bytes)`);
 
         try {
           if (topic.endsWith("/metadata")) {
@@ -136,17 +145,22 @@
 
       client.on("error", (error) => {
         console.error("Error MQTT:", error);
-        status.textContent = `Error: ${error.message}`;
+        status.textContent = `Error de conexión: ${error.message}. Reintentando...`;
+        setTimeout(() => {
+          if (!client.connected) {
+            location.reload();
+          }
+        }, 5000);
       });
 
       client.on("offline", () => {
-        console.log("Cliente MQTT desconectado, intentando reconectar...");
-        status.textContent = "Reconectando...";
+        console.log("Conexión perdida, intentando reconectar...");
+        status.textContent = "Conexión perdida. Reconectando...";
       });
 
       client.on("reconnect", () => {
         console.log("Intentando reconexión MQTT...");
-        status.textContent = "Intentando reconexión...";
+        status.textContent = "Reconectando al servidor...";
       });
     </script>
   </body>
