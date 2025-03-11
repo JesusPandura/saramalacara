@@ -169,6 +169,7 @@
       client.on("offline", () => {
         console.log("Conexión perdida, intentando reconectar...");
         status.textContent = "Conexión perdida. Reconectando...";
+        reconnectButton.style.display = "block";
       });
 
       client.on("reconnect", () => {
