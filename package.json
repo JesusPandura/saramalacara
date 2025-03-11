@@ -1,0 +1,12 @@
+{
+  "name": "esp32-cam-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "serve src"
+  },
+  "dependencies": {
+    "serve": "^14.0.0"
+  }
+} 
