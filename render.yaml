@@ -2,9 +2,9 @@ services:
   - type: web
     name: esp32-cam-viewer
     runtime: static
-    buildCommand: null
-    staticPublishPath: ./src
+    buildCommand: ""
+    staticPublishPath: ./src/dist
     headers:
       - path: /*
         name: Cache-Control
-        value: no-cache 
+        value: no-cache
