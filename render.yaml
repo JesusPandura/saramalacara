@@ -2,8 +2,8 @@ services:
   - type: web
     name: esp32-cam-viewer
     runtime: static
-    buildCommand: ""
-    staticPublishPath: ./src
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
     headers:
       - path: /*
         name: Cache-Control
