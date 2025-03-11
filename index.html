@@ -12,15 +12,6 @@
         color: #666;
         text-align: center;
       }
-      #fpsCounter {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        background: rgba(0, 0, 0, 0.5);
-        color: white;
-        padding: 5px;
-        border-radius: 3px;
-      }
       canvas {
         width: 100%;
         border: 1px solid #ccc;
@@ -30,160 +21,95 @@
   <body>
     <div id="videoContainer">
       <canvas id="videoCanvas"></canvas>
-      <div id="fpsCounter">0 FPS</div>
       <p id="status">Conectando...</p>
     </div>
 
     <script>
-      // Configuración
-      const MAX_BUFFER_SIZE = 2; // Reducido para menor latencia
-      const FPS_UPDATE_INTERVAL = 1000;
-      const MAX_CANVAS_SIZE = 640; // Limitar tamaño máximo del canvas
-
-      // Variables globales
       const client = mqtt.connect("ws://test.mosquitto.org:8080", {
         clientId: "viewer_" + Math.random().toString(16).substr(2, 8),
         protocol: "ws",
-        keepalive: 30, // Reducido para mejor respuesta
+        keepalive: 60,
         connectTimeout: 4000,
         reconnectPeriod: 1000,
         clean: true,
-        qos: 0,
+        qos: 1,
       });
-
       const canvas = document.getElementById("videoCanvas");
-      const ctx = canvas.getContext("2d", { alpha: false }); // Optimización
+      const ctx = canvas.getContext("2d");
       const status = document.getElementById("status");
-      const fpsCounter = document.getElementById("fpsCounter");
 
-      let frameBuffer = [];
       let currentFrame = [];
       let expectedChunks = 0;
       let receivedChunks = 0;
       let deviceId = null;
-      let isProcessingFrame = false;
-      let frameCount = 0;
-      let lastFPSUpdate = Date.now();
 
-      // Función para actualizar FPS
-      function updateFPS() {
-        const now = Date.now();
-        const delta = now - lastFPSUpdate;
-        if (delta >= FPS_UPDATE_INTERVAL) {
-          const fps = Math.round((frameCount * 1000) / delta);
-          fpsCounter.textContent = `${fps} FPS`;
-          frameCount = 0;
-          lastFPSUpdate = now;
-        }
-      }
-
-      // Función optimizada para procesar frame
-      async function processFrame(frameData) {
-        if (isProcessingFrame) {
-          // Si estamos procesando, descartamos el frame para evitar retrasos
-          return;
-        }
-        isProcessingFrame = true;
-
-        try {
-          const blob = new Blob([frameData], { type: "image/jpeg" });
-          const url = URL.createObjectURL(blob);
-          
-          return new Promise((resolve, reject) => {
-            const img = new Image();
-            
-            img.onload = () => {
-              // Calcular dimensiones manteniendo proporción
-              let width = img.width;
-              let height = img.height;
-              
-              if (width > MAX_CANVAS_SIZE || height > MAX_CANVAS_SIZE) {
-                const ratio = Math.min(MAX_CANVAS_SIZE / width, MAX_CANVAS_SIZE / height);
-                width *= ratio;
-                height *= ratio;
-              }
-
-              // Actualizar canvas solo si las dimensiones cambiaron
-              if (canvas.width !== width || canvas.height !== height) {
-                canvas.width = width;
-                canvas.height = height;
-              }
-
-              // Usar createImageBitmap para mejor rendimiento
-              createImageBitmap(img).then(bitmap => {
-                ctx.drawImage(bitmap, 0, 0, width, height);
-                bitmap.close();
-                URL.revokeObjectURL(url);
-                frameCount++;
-                updateFPS();
-                status.textContent = "Streaming...";
-                resolve();
-              });
-            };
-
-            img.onerror = reject;
-            img.src = url;
-          });
-        } finally {
-          isProcessingFrame = false;
-        }
-      }
-
-      // Eventos MQTT
       client.on("connect", () => {
         console.log("Conectado al broker MQTT");
         status.textContent = "Conectado al broker MQTT, esperando stream...";
-        client.subscribe("esp32cam/stream/#", { qos: 0 });
+        const topic = "esp32cam/stream/#";
+        client.subscribe(topic, (err) => {
+          if (err) {
+            console.error("Error al suscribirse:", err);
+          } else {
+            console.log("Suscrito exitosamente a:", topic);
+          }
+        });
       });
 
-      client.on("message", async (topic, message) => {
+      client.on("close", () => {
+        console.log("Desconectado del broker MQTT");
+        status.textContent = "Desconectado del broker MQTT";
+      });
+
+      client.on("message", (topic, message) => {
+        console.log(`Mensaje en ${topic} (${message.length} bytes)`);
+
         try {
           if (topic.endsWith("/metadata")) {
             const metadata = JSON.parse(message.toString());
+            console.log("Metadata recibida:", metadata);
             deviceId = metadata.deviceId;
             expectedChunks = metadata.chunks;
             currentFrame = new Array(expectedChunks).fill(null);
             receivedChunks = 0;
+            status.textContent = `Recibiendo frame (0/${expectedChunks} chunks)`;
           } else if (topic.includes("/frame/")) {
             const frameIndex = parseInt(topic.split("/").pop());
-            
-            // Si el frame está incompleto y recibimos uno nuevo, descartamos el anterior
-            if (frameIndex === 0 && receivedChunks > 0 && receivedChunks < expectedChunks) {
-              currentFrame = new Array(expectedChunks).fill(null);
-              receivedChunks = 0;
-            }
-
             currentFrame[frameIndex] = message;
             receivedChunks++;
+            status.textContent = `Recibiendo frame (${receivedChunks}/${expectedChunks} chunks)`;
 
             if (receivedChunks === expectedChunks) {
-              // Usar Uint8Array más eficientemente
-              const totalLength = currentFrame.reduce((acc, chunk) => acc + (chunk ? chunk.length : 0), 0);
-              const fullFrame = new Uint8Array(totalLength);
-              let offset = 0;
+              try {
+                const fullFrame = new Uint8Array(
+                  currentFrame.reduce((acc, chunk) => acc + chunk.length, 0)
+                );
+                let offset = 0;
+                currentFrame.forEach((chunk) => {
+                  if (chunk) {
+                    fullFrame.set(chunk, offset);
+                    offset += chunk.length;
+                  }
+                });
 
-              for (const chunk of currentFrame) {
-                if (chunk) {
-                  fullFrame.set(new Uint8Array(chunk), offset);
-                  offset += chunk.length;
-                }
+                const blob = new Blob([fullFrame], { type: "image/jpeg" });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                img.onload = () => {
+                  canvas.width = img.width;
+                  canvas.height = img.height;
+                  ctx.drawImage(img, 0, 0);
+                  URL.revokeObjectURL(url);
+                  status.textContent = "Frame mostrado correctamente";
+                };
+                img.onerror = (err) => {
+                  console.error("Error al cargar la imagen:", err);
+                  status.textContent = "Error al mostrar el frame";
+                };
+                img.src = url;
+              } catch (err) {
+                console.error("Error procesando frame:", err);
               }
-
-              // Si el buffer está lleno, procesar inmediatamente
-              if (frameBuffer.length >= MAX_BUFFER_SIZE) {
-                frameBuffer = [fullFrame];
-              } else {
-                frameBuffer.push(fullFrame);
-              }
-
-              if (!isProcessingFrame && frameBuffer.length > 0) {
-                const frameToProcess = frameBuffer.shift();
-                processFrame(frameToProcess).catch(console.error);
-              }
-
-              // Limpiar frame actual
-              currentFrame = new Array(expectedChunks).fill(null);
-              receivedChunks = 0;
             }
           }
         } catch (error) {
@@ -191,23 +117,19 @@
         }
       });
 
-      // Manejo de errores y reconexiones
       client.on("error", (error) => {
         console.error("Error MQTT:", error);
         status.textContent = `Error: ${error.message}`;
       });
 
       client.on("offline", () => {
+        console.log("Cliente MQTT desconectado, intentando reconectar...");
         status.textContent = "Reconectando...";
       });
 
       client.on("reconnect", () => {
+        console.log("Intentando reconexión MQTT...");
         status.textContent = "Intentando reconexión...";
-      });
-
-      // Limpieza al cerrar la página
-      window.addEventListener("beforeunload", () => {
-        client.end();
       });
     </script>
   </body>
