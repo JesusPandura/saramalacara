@@ -2,19 +2,57 @@
 <html>
   <head>
     <title>ESP32-CAM Remote Viewer</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
     <style>
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        -webkit-overflow-scrolling: touch;
+      }
+
       #videoContainer {
-        max-width: 400px;
+        max-width: 100%;
         margin: 0 auto;
+        padding: 10px;
+        box-sizing: border-box;
       }
+
       #status {
-        color: #666;
+        position: fixed;
+        bottom: 20px;
+        left: 0;
+        right: 0;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
         text-align: center;
+        z-index: 1000;
+        font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI",
+          Roboto, "Helvetica Neue", Arial, sans-serif;
       }
+
       canvas {
         width: 100%;
-        border: 1px solid #ccc;
+        height: auto;
+        display: block;
+        border: none;
+      }
+
+      * {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
       }
     </style>
   </head>
@@ -22,16 +60,18 @@
     <div id="videoContainer">
       <canvas id="videoCanvas"></canvas>
       <p id="status">Conectando...</p>
-      <button id="reconnectButton" style="display: none">Reconectar</button>
     </div>
 
     <script>
-      const client = mqtt.connect("ws://broker.hivemq.com:8000", {
+      const isIOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+      const mqttConfig = {
         clientId: "viewer_" + Math.random().toString(16).substr(2, 8),
-        protocol: "ws",
-        keepalive: 60,
-        connectTimeout: 30000,
-        reconnectPeriod: 5000,
+        protocol: "wss",
+        keepalive: isIOS ? 20 : 30,
+        connectTimeout: isIOS ? 15000 : 10000,
+        reconnectPeriod: 2000,
         clean: true,
         qos: 0,
         rejectUnauthorized: false,
@@ -41,140 +81,180 @@
           qos: 0,
           retain: false,
         },
-      });
+      };
 
+      function connectMQTT() {
+        try {
+          return mqtt.connect("wss://test.mosquitto.org:8081", mqttConfig);
+        } catch (e) {
+          console.error("Error al conectar:", e);
+          status.textContent = "Error de conexión. Reintentando...";
+          return null;
+        }
+      }
+
+      let client = connectMQTT();
       const canvas = document.getElementById("videoCanvas");
       const ctx = canvas.getContext("2d");
       const status = document.getElementById("status");
-      const reconnectButton = document.getElementById("reconnectButton");
 
       let currentFrame = [];
       let expectedChunks = 0;
       let receivedChunks = 0;
       let deviceId = null;
+      let reconnectAttempts = 0;
+      const MAX_RECONNECT_ATTEMPTS = 3;
 
-      let connectionTimeout = setTimeout(() => {
-        if (!client.connected) {
-          status.textContent = "Timeout de conexión. Reintentando...";
-          client.end(true);
-          location.reload();
+      let connectionTimeout = setTimeout(
+        () => {
+          if (!client?.connected) {
+            handleConnectionFailure();
+          }
+        },
+        isIOS ? 20000 : 15000
+      );
+
+      function handleConnectionFailure() {
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          status.textContent = "Reintentando conexión...";
+          reconnectAttempts++;
+
+          if (client) {
+            client.end(true);
+          }
+
+          setTimeout(() => {
+            client = connectMQTT();
+            setupEventListeners();
+          }, 2000);
+        } else {
+          status.textContent =
+            "No se pudo establecer conexión. Por favor, recarga la página.";
         }
-      }, 15000);
+      }
 
-      console.log("Intentando conectar a MQTT...");
+      function setupEventListeners() {
+        if (!client) return;
 
-      client.on("connect", () => {
-        clearTimeout(connectionTimeout);
-        console.log("Conectado al broker MQTT");
-        console.log("Client ID:", client.options.clientId);
-        console.log("Broker URL:", client.options.hostname);
-        status.textContent = "Conectado al broker MQTT, esperando stream...";
+        client.on("connect", () => {
+          clearTimeout(connectionTimeout);
+          reconnectAttempts = 0;
+          console.log("Conectado al broker MQTT");
+          status.textContent = "Conectado al broker MQTT, esperando stream...";
 
-        const topics = [
-          "esp32cam/stream/#",
-          "esp32cam/+/metadata",
-          "esp32cam/+/frame/#",
-        ];
+          const topics = [
+            "esp32cam/stream/#",
+            "esp32cam/+/metadata",
+            "esp32cam/+/frame/#",
+          ];
 
-        topics.forEach((topic) => {
-          client.subscribe(topic, { qos: 0 }, (err) => {
-            if (err) {
-              console.error("Error al suscribirse a " + topic + ":", err);
-              status.textContent = "Error al suscribirse: " + err.message;
-            } else {
-              console.log("Suscrito a:", topic);
-            }
+          topics.forEach((topic) => {
+            client.subscribe(topic, { qos: 0 }, (err) => {
+              if (err) {
+                console.error("Error al suscribirse a " + topic + ":", err);
+                status.textContent = "Error al suscribirse: " + err.message;
+              }
+            });
           });
         });
-      });
 
-      reconnectButton.addEventListener("click", () => {
-        status.textContent = "Reconectando manualmente...";
-        client.end(true);
-        location.reload();
-      });
+        client.on("close", () => {
+          console.log("Desconectado del broker MQTT");
+          status.textContent = "Desconectado del broker MQTT. Reconectando...";
+        });
 
-      client.on("close", () => {
-        console.log("Desconectado del broker MQTT");
-        status.textContent = "Desconectado del broker MQTT. Reconectando...";
-        reconnectButton.style.display = "block";
-      });
+        client.on("message", (topic, message) => {
+          console.log(`Mensaje en ${topic} (${message.length} bytes)`);
 
-      client.on("message", (topic, message) => {
-        console.log(`Mensaje en ${topic} (${message.length} bytes)`);
+          try {
+            if (topic.endsWith("/metadata")) {
+              const metadata = JSON.parse(message.toString());
+              console.log("Metadata recibida:", metadata);
+              deviceId = metadata.deviceId;
+              expectedChunks = metadata.chunks;
+              currentFrame = new Array(expectedChunks).fill(null);
+              receivedChunks = 0;
+              status.textContent = `Recibiendo frame (0/${expectedChunks} chunks)`;
+            } else if (topic.includes("/frame/")) {
+              const frameIndex = parseInt(topic.split("/").pop());
+              currentFrame[frameIndex] = message;
+              receivedChunks++;
+              status.textContent = `Recibiendo frame (${receivedChunks}/${expectedChunks} chunks)`;
 
-        try {
-          if (topic.endsWith("/metadata")) {
-            const metadata = JSON.parse(message.toString());
-            console.log("Metadata recibida:", metadata);
-            deviceId = metadata.deviceId;
-            expectedChunks = metadata.chunks;
-            currentFrame = new Array(expectedChunks).fill(null);
-            receivedChunks = 0;
-            status.textContent = `Recibiendo frame (0/${expectedChunks} chunks)`;
-          } else if (topic.includes("/frame/")) {
-            const frameIndex = parseInt(topic.split("/").pop());
-            currentFrame[frameIndex] = message;
-            receivedChunks++;
-            status.textContent = `Recibiendo frame (${receivedChunks}/${expectedChunks} chunks)`;
+              if (receivedChunks === expectedChunks) {
+                try {
+                  const fullFrame = new Uint8Array(
+                    currentFrame.reduce((acc, chunk) => acc + chunk.length, 0)
+                  );
+                  let offset = 0;
+                  currentFrame.forEach((chunk) => {
+                    if (chunk) {
+                      fullFrame.set(chunk, offset);
+                      offset += chunk.length;
+                    }
+                  });
 
-            if (receivedChunks === expectedChunks) {
-              try {
-                const fullFrame = new Uint8Array(
-                  currentFrame.reduce((acc, chunk) => acc + chunk.length, 0)
-                );
-                let offset = 0;
-                currentFrame.forEach((chunk) => {
-                  if (chunk) {
-                    fullFrame.set(chunk, offset);
-                    offset += chunk.length;
-                  }
-                });
-
-                const blob = new Blob([fullFrame], { type: "image/jpeg" });
-                const url = URL.createObjectURL(blob);
-                const img = new Image();
-                img.onload = () => {
-                  canvas.width = img.width;
-                  canvas.height = img.height;
-                  ctx.drawImage(img, 0, 0);
-                  URL.revokeObjectURL(url);
-                  status.textContent = "Frame mostrado correctamente";
-                };
-                img.onerror = (err) => {
-                  console.error("Error al cargar la imagen:", err);
-                  status.textContent = "Error al mostrar el frame";
-                };
-                img.src = url;
-              } catch (err) {
-                console.error("Error procesando frame:", err);
+                  const blob = new Blob([fullFrame], { type: "image/jpeg" });
+                  const url = URL.createObjectURL(blob);
+                  const img = new Image();
+                  img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    URL.revokeObjectURL(url);
+                    status.textContent = "Frame mostrado correctamente";
+                  };
+                  img.onerror = (err) => {
+                    console.error("Error al cargar la imagen:", err);
+                    status.textContent = "Error al mostrar el frame";
+                  };
+                  img.src = url;
+                } catch (err) {
+                  console.error("Error procesando frame:", err);
+                }
               }
             }
+          } catch (error) {
+            console.error("Error procesando mensaje:", error);
           }
-        } catch (error) {
-          console.error("Error procesando mensaje:", error);
+        });
+
+        client.on("error", (error) => {
+          console.error("Error MQTT:", error);
+          status.textContent = `Error de conexión: ${error.message}. Reintentando...`;
+          setTimeout(() => {
+            if (!client.connected) {
+              location.reload();
+            }
+          }, 5000);
+        });
+
+        client.on("offline", () => {
+          console.log("Conexión perdida, intentando reconectar...");
+          status.textContent = "Conexión perdida. Reconectando...";
+        });
+
+        client.on("reconnect", () => {
+          console.log("Intentando reconexión MQTT...");
+          status.textContent = "Reconectando al servidor...";
+        });
+      }
+
+      setupEventListeners();
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          if (client?.connected) {
+            client.end();
+          }
+        } else {
+          client = connectMQTT();
+          setupEventListeners();
         }
       });
 
-      client.on("error", (error) => {
-        console.error("Error MQTT:", error);
-        status.textContent = `Error de conexión: ${error.message}. Reintentando...`;
-        setTimeout(() => {
-          if (!client.connected) {
-            location.reload();
-          }
-        }, 5000);
-      });
-
-      client.on("offline", () => {
-        console.log("Conexión perdida, intentando reconectar...");
-        status.textContent = "Conexión perdida. Reconectando...";
-        reconnectButton.style.display = "block";
-      });
-
-      client.on("reconnect", () => {
-        console.log("Intentando reconexión MQTT...");
-        status.textContent = "Reconectando al servidor...";
+      document.addEventListener("gesturestart", (e) => {
+        e.preventDefault();
       });
     </script>
   </body>
