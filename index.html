@@ -38,6 +38,8 @@
       const ctx = canvas.getContext("2d");
       const status = document.getElementById("status");
 
+      console.log("Iniciando conexión MQTT...");
+
       let currentFrame = [];
       let expectedChunks = 0;
       let receivedChunks = 0;
@@ -47,13 +49,27 @@
         console.log("Conectado al broker MQTT");
         status.textContent = "Conectado al broker MQTT, esperando stream...";
         const topic = "esp32cam/stream/#";
+        console.log("Intentando suscribirse a:", topic);
+
         client.subscribe(topic, (err) => {
           if (err) {
             console.error("Error al suscribirse:", err);
+            status.textContent = "Error al suscribirse: " + err.message;
           } else {
             console.log("Suscrito exitosamente a:", topic);
+            status.textContent = "Suscrito y esperando imágenes...";
           }
         });
+      });
+
+      client.on("connect_error", (error) => {
+        console.error("Error de conexión MQTT:", error);
+        status.textContent = "Error de conexión: " + error.message;
+      });
+
+      client.on("connect_timeout", () => {
+        console.error("Timeout en la conexión MQTT");
+        status.textContent = "Timeout en la conexión";
       });
 
       client.on("close", () => {
@@ -62,7 +78,8 @@
       });
 
       client.on("message", (topic, message) => {
-        console.log(`Mensaje en ${topic} (${message.length} bytes)`);
+        console.log(`Mensaje recibido en ${topic}`);
+        console.log(`Tamaño del mensaje: ${message.length} bytes`);
 
         try {
           if (topic.endsWith("/metadata")) {
