@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ESP32-CAM Remote Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+      #videoContainer {
+        max-width: 400px;
+        margin: 0 auto;
+      }
+      #status {
+        color: #666;
+        text-align: center;
+      }
+      canvas {
+        width: 100%;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="videoContainer">
+      <canvas id="videoCanvas"></canvas>
+      <p id="status">Conectando...</p>
+    </div>
+
+    <script>
+      const client = mqtt.connect("ws://test.mosquitto.org:8080", {
+        clientId: "viewer_" + Math.random().toString(16).substr(2, 8),
+        protocol: "ws",
+        keepalive: 60,
+        connectTimeout: 4000,
+        reconnectPeriod: 1000,
+        clean: true,
+        qos: 1,
+      });
+      const canvas = document.getElementById("videoCanvas");
+      const ctx = canvas.getContext("2d");
+      const status = document.getElementById("status");
+
+      let currentFrame = [];
+      let expectedChunks = 0;
+      let receivedChunks = 0;
+      let deviceId = null;
+
+      client.on("connect", () => {
+        console.log("Conectado al broker MQTT");
+        status.textContent = "Conectado al broker MQTT, esperando stream...";
+        const topic = "esp32cam/stream/#";
+        client.subscribe(topic, (err) => {
+          if (err) {
+            console.error("Error al suscribirse:", err);
+          } else {
+            console.log("Suscrito exitosamente a:", topic);
+          }
+        });
+      });
+
+      client.on("close", () => {
+        console.log("Desconectado del broker MQTT");
+        status.textContent = "Desconectado del broker MQTT";
+      });
+
+      client.on("message", (topic, message) => {
+        console.log(`Mensaje en ${topic} (${message.length} bytes)`);
+
+        try {
+          if (topic.endsWith("/metadata")) {
+            const metadata = JSON.parse(message.toString());
+            console.log("Metadata recibida:", metadata);
+            deviceId = metadata.deviceId;
+            expectedChunks = metadata.chunks;
+            currentFrame = new Array(expectedChunks).fill(null);
+            receivedChunks = 0;
+            status.textContent = `Recibiendo frame (0/${expectedChunks} chunks)`;
+          } else if (topic.includes("/frame/")) {
+            const frameIndex = parseInt(topic.split("/").pop());
+            currentFrame[frameIndex] = message;
+            receivedChunks++;
+            status.textContent = `Recibiendo frame (${receivedChunks}/${expectedChunks} chunks)`;
+
+            if (receivedChunks === expectedChunks) {
+              try {
+                const fullFrame = new Uint8Array(
+                  currentFrame.reduce((acc, chunk) => acc + chunk.length, 0)
+                );
+                let offset = 0;
+                currentFrame.forEach((chunk) => {
+                  if (chunk) {
+                    fullFrame.set(chunk, offset);
+                    offset += chunk.length;
+                  }
+                });
+
+                const blob = new Blob([fullFrame], { type: "image/jpeg" });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                img.onload = () => {
+                  canvas.width = img.width;
+                  canvas.height = img.height;
+                  ctx.drawImage(img, 0, 0);
+                  URL.revokeObjectURL(url);
+                  status.textContent = "Frame mostrado correctamente";
+                };
+                img.onerror = (err) => {
+                  console.error("Error al cargar la imagen:", err);
+                  status.textContent = "Error al mostrar el frame";
+                };
+                img.src = url;
+              } catch (err) {
+                console.error("Error procesando frame:", err);
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error procesando mensaje:", error);
+        }
+      });
+
+      client.on("error", (error) => {
+        console.error("Error MQTT:", error);
+        status.textContent = `Error: ${error.message}`;
+      });
+
+      client.on("offline", () => {
+        console.log("Cliente MQTT desconectado, intentando reconectar...");
+        status.textContent = "Reconectando...";
+      });
+
+      client.on("reconnect", () => {
+        console.log("Intentando reconexión MQTT...");
+        status.textContent = "Intentando reconexión...";
+      });
+    </script>
+  </body>
+</html>
