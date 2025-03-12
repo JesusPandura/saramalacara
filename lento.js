@@ -1,3 +1,5 @@
+lento  
+
 <!DOCTYPE html>
 <html>
   <head>
@@ -13,7 +15,6 @@
     />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
     <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jsmpeg@1.0.0/jsmpeg.min.js"></script>
     <style>
       html,
       body {
@@ -107,28 +108,13 @@
         height: auto;
         display: block;
       }
-
-      #videoCanvas {
-        width: 100%;
-        height: auto;
-        display: block;
-      }
-
-      #bufferCanvas {
-        display: none;
-      }
-
-      #videoCanvas {
-        backface-visibility: hidden;
-        transform: translateZ(0);
-        perspective: 1000;
-        will-change: transform;
-      }
     </style>
   </head>
   <body>
     <div id="videoContainer">
-      <canvas id="videoCanvas"></canvas>
+      <canvas id="videoCanvas" style="display: none"></canvas>
+      <canvas id="videoStream" style="display: none"></canvas>
+      <video id="rtcVideo" autoplay playsinline></video>
       <div id="detectionResults"></div>
       <p id="status">Conectando...</p>
     </div>
@@ -237,222 +223,34 @@
       let mediaSource;
       let rtcVideo;
 
-      let jsmpegPlayer;
-      let frameBuffer = [];
-      const PERFORMANCE_SETTINGS = {
-        BUFFER_SIZE: 3,
-        FRAME_INTERVAL: 1000 / 60,
-        MIN_BUFFER_SIZE: 2,
-        MAX_WIDTH: 640,
-        JPEG_QUALITY: 0.8,
-        SCALE_FACTOR: 1.0,
-        AUTO_ADJUST: true,
-        TARGET_FPS: 30,
-      };
-      let isProcessingBuffer = false;
-      let isFirstFrame = true;
+      async function setupVideoBuffer() {
+        rtcVideo = document.getElementById("rtcVideo");
+        mediaSource = new MediaSource();
+        rtcVideo.src = URL.createObjectURL(mediaSource);
 
-      let lastDrawTime = 0;
-
-      let frameTimestamps = [];
-      let currentFPS = 0;
-
-      // Crear dos canvas offscreen para double buffering
-      const backCanvas = document.createElement("canvas");
-      const backCtx = backCanvas.getContext("2d", {
-        alpha: false,
-        desynchronized: true,
-      });
-
-      const frontCanvas = document.createElement("canvas");
-      const frontCtx = frontCanvas.getContext("2d", {
-        alpha: false,
-        desynchronized: true,
-      });
-
-      // Función para intercambiar buffers suavemente
-      function swapBuffers(imageBitmap) {
-        // Preparar el back buffer
-        if (
-          backCanvas.width !== imageBitmap.width ||
-          backCanvas.height !== imageBitmap.height
-        ) {
-          backCanvas.width =
-            frontCanvas.width =
-            canvas.width =
-              imageBitmap.width;
-          backCanvas.height =
-            frontCanvas.height =
-            canvas.height =
-              imageBitmap.height;
-        }
-
-        // Dibujar nuevo frame en el back buffer
-        backCtx.drawImage(imageBitmap, 0, 0);
-
-        // Copiar back buffer al front buffer
-        frontCtx.drawImage(backCanvas, 0, 0);
-
-        // Aplicar una transición suave al canvas visible
-        ctx.globalAlpha = 1.0;
-        ctx.drawImage(frontCanvas, 0, 0);
-      }
-
-      // Función para redimensionar y optimizar frames
-      async function optimizeFrame(fullFrame) {
-        try {
-          const blob = new Blob([fullFrame], { type: "image/jpeg" });
-          const imageBitmap = await createImageBitmap(blob);
-
-          // Calcular dimensiones manteniendo aspecto
-          let targetWidth =
-            imageBitmap.width * PERFORMANCE_SETTINGS.SCALE_FACTOR;
-          let targetHeight =
-            imageBitmap.height * PERFORMANCE_SETTINGS.SCALE_FACTOR;
-
-          if (targetWidth > PERFORMANCE_SETTINGS.MAX_WIDTH) {
-            const ratio = PERFORMANCE_SETTINGS.MAX_WIDTH / targetWidth;
-            targetWidth *= ratio;
-            targetHeight *= ratio;
-          }
-
-          // Usar un canvas temporal para el redimensionamiento
-          const tempCanvas = document.createElement("canvas");
-          tempCanvas.width = targetWidth;
-          tempCanvas.height = targetHeight;
-          const tempCtx = tempCanvas.getContext("2d", {
-            alpha: false,
-            desynchronized: true,
+        return new Promise((resolve) => {
+          mediaSource.addEventListener("sourceopen", () => {
+            const mimeType = "video/webm;codecs=vp8";
+            sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+            sourceBuffer.mode = "sequence";
+            resolve();
           });
-
-          // Aplicar optimizaciones de renderizado
-          tempCtx.imageSmoothingEnabled = true;
-          tempCtx.imageSmoothingQuality = "medium";
-
-          // Dibujar frame redimensionado
-          tempCtx.drawImage(imageBitmap, 0, 0, targetWidth, targetHeight);
-
-          // Liberar recursos
-          imageBitmap.close();
-
-          // Convertir a Blob con calidad ajustada
-          const optimizedBlob = await new Promise((resolve) => {
-            tempCanvas.toBlob(
-              resolve,
-              "image/jpeg",
-              PERFORMANCE_SETTINGS.JPEG_QUALITY
-            );
-          });
-
-          // Convertir Blob a ArrayBuffer
-          return new Uint8Array(await optimizedBlob.arrayBuffer());
-        } catch (error) {
-          console.error("Error optimizing frame:", error);
-          return fullFrame; // Retornar frame original si hay error
-        }
+        });
       }
-
-      // Función para calcular y ajustar FPS
-      function updateFPS() {
-        const now = performance.now();
-        frameTimestamps.push(now);
-
-        // Mantener solo los últimos 30 frames para el cálculo
-        if (frameTimestamps.length > 30) {
-          frameTimestamps.shift();
-        }
-
-        if (frameTimestamps.length > 1) {
-          const timeElapsed = now - frameTimestamps[0];
-          currentFPS = (frameTimestamps.length / timeElapsed) * 1000;
-
-          // Auto-ajuste de calidad basado en FPS
-          if (PERFORMANCE_SETTINGS.AUTO_ADJUST) {
-            if (currentFPS < PERFORMANCE_SETTINGS.TARGET_FPS - 5) {
-              // Reducir calidad si FPS está bajo
-              PERFORMANCE_SETTINGS.SCALE_FACTOR = Math.max(
-                0.5,
-                PERFORMANCE_SETTINGS.SCALE_FACTOR - 0.1
-              );
-              PERFORMANCE_SETTINGS.JPEG_QUALITY = Math.max(
-                0.6,
-                PERFORMANCE_SETTINGS.JPEG_QUALITY - 0.1
-              );
-            } else if (currentFPS > PERFORMANCE_SETTINGS.TARGET_FPS + 5) {
-              // Aumentar calidad si FPS está alto
-              PERFORMANCE_SETTINGS.SCALE_FACTOR = Math.min(
-                1.0,
-                PERFORMANCE_SETTINGS.SCALE_FACTOR + 0.1
-              );
-              PERFORMANCE_SETTINGS.JPEG_QUALITY = Math.min(
-                0.9,
-                PERFORMANCE_SETTINGS.JPEG_QUALITY + 0.1
-              );
-            }
-          }
-        }
-      }
-
-      // Modificar processFrame para incluir optimización
-      async function processFrame(fullFrame) {
-        const currentTime = performance.now();
-
-        if (currentTime - lastDrawTime < PERFORMANCE_SETTINGS.FRAME_INTERVAL) {
-          if (frameBuffer.length < PERFORMANCE_SETTINGS.BUFFER_SIZE) {
-            frameBuffer.push(fullFrame);
-          }
-          return;
-        }
-
-        lastDrawTime = currentTime;
-
-        try {
-          // Optimizar frame antes de procesarlo
-          const optimizedFrame = await optimizeFrame(fullFrame);
-          const blob = new Blob([optimizedFrame], { type: "image/jpeg" });
-
-          const imageBitmap = await createImageBitmap(blob, {
-            imageOrientation: "none",
-            premultiplyAlpha: "none",
-            colorSpaceConversion: "none",
-          });
-
-          requestAnimationFrame(() => {
-            swapBuffers(imageBitmap);
-            imageBitmap.close();
-            updateFPS();
-
-            // Actualizar status con FPS
-            status.textContent = `Streaming... Buffer: ${frameBuffer.length}/${
-              PERFORMANCE_SETTINGS.BUFFER_SIZE
-            } FPS: ${Math.round(currentFPS)}`;
-          });
-
-          if (frameBuffer.length > 0) {
-            const nextFrame = frameBuffer.shift();
-            processFrame(nextFrame);
-          }
-        } catch (error) {
-          console.error("Error processing frame:", error);
-        }
-      }
-
-      // Optimizar el canvas principal
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
 
       function setupEventListeners() {
         if (!client) return;
 
-        client.on("connect", () => {
+        client.on("connect", async () => {
           clearTimeout(connectionTimeout);
           reconnectAttempts = 0;
           console.log("Conectado al broker MQTT");
+          status.textContent = "Inicializando buffer de video...";
+
+          // Inicializar buffer de video
+          await setupVideoBuffer();
           status.textContent = "Conectado al broker MQTT, esperando stream...";
 
-          // Suscribirse a los topics necesarios
           const topics = [
             "esp32cam/stream/#",
             "esp32cam/+/metadata",
@@ -475,22 +273,28 @@
         });
 
         client.on("message", async (topic, message) => {
+          console.log(`Mensaje en ${topic} (${message.length} bytes)`);
+
           try {
             if (topic.endsWith("/metadata")) {
               const metadata = JSON.parse(message.toString());
+              console.log("Metadata recibida:", metadata);
               deviceId = metadata.deviceId;
               expectedChunks = metadata.chunks;
               currentFrame = new Array(expectedChunks).fill(null);
               receivedChunks = 0;
-              status.textContent = `Buffering... (${frameBuffer.length}/${PERFORMANCE_SETTINGS.BUFFER_SIZE})`;
+              status.textContent = `Recibiendo frame (0/${expectedChunks} chunks)`;
             } else if (topic.includes("/frame/")) {
               const frameIndex = parseInt(topic.split("/").pop());
               currentFrame[frameIndex] = message;
               receivedChunks++;
+              status.textContent = `Recibiendo frame (${receivedChunks}/${expectedChunks} chunks)`;
 
               if (receivedChunks === expectedChunks) {
                 try {
-                  // Construir el frame completo
+                  // Clear previous detections
+                  clearDetections();
+
                   const fullFrame = new Uint8Array(
                     currentFrame.reduce((acc, chunk) => acc + chunk.length, 0)
                   );
@@ -502,41 +306,18 @@
                     }
                   });
 
-                  // Si el buffer está vacío, procesar inmediatamente
-                  if (frameBuffer.length === 0 && !isProcessingBuffer) {
-                    if (
-                      receivedChunks >= PERFORMANCE_SETTINGS.MIN_BUFFER_SIZE
-                    ) {
-                      processFrame(fullFrame);
-                    } else {
-                      frameBuffer.push(fullFrame);
-                    }
+                  // Actualizar el stream de video
+                  await updateVideoStream(fullFrame);
+
+                  // Procesar detección de objetos
+                  const blob = new Blob([fullFrame], { type: "image/jpeg" });
+                  const detectionResult = await detectObjects(blob);
+                  if (detectionResult && detectionResult.status === "success") {
+                    drawDetections(detectionResult.detections);
+                    status.textContent = "Detección completada";
                   } else {
-                    if (
-                      frameBuffer.length >= PERFORMANCE_SETTINGS.BUFFER_SIZE
-                    ) {
-                      // Mantener frames más recientes pero no eliminar demasiados
-                      frameBuffer = frameBuffer.slice(
-                        -PERFORMANCE_SETTINGS.MIN_BUFFER_SIZE
-                      );
-                    }
-                    frameBuffer.push(fullFrame);
+                    status.textContent = "Error en la detección";
                   }
-
-                  // Procesar detección cada 5 frames usando el último frame completo
-                  if (receivedChunks % 5 === 0) {
-                    const blob = new Blob([fullFrame], { type: "image/jpeg" });
-                    detectObjects(blob).then((result) => {
-                      if (result && result.status === "success") {
-                        drawDetections(result.detections);
-                      }
-                    });
-                  }
-
-                  // Resetear para el siguiente frame
-                  receivedChunks = 0;
-                  currentFrame = new Array(expectedChunks).fill(null);
-                  status.textContent = `Streaming... Buffer: ${frameBuffer.length}/${PERFORMANCE_SETTINGS.BUFFER_SIZE}`;
                 } catch (err) {
                   console.error("Error procesando frame:", err);
                   status.textContent = "Error procesando frame";
@@ -633,12 +414,13 @@
       function drawDetections(detections) {
         clearDetections();
 
-        if (!detections || detections.length === 0) return;
+        if (!detections || detections.length === 0) {
+          return;
+        }
 
-        const canvas = document.getElementById("videoCanvas");
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = rect.width / canvas.width;
-        const scaleY = rect.height / canvas.height;
+        const rect = rtcVideo.getBoundingClientRect();
+        const scaleX = rect.width / rtcVideo.videoWidth;
+        const scaleY = rect.height / rtcVideo.videoHeight;
 
         detections.forEach((detection) => {
           const [x1, y1, x2, y2] = detection.bbox;
@@ -664,6 +446,80 @@
 
           document.getElementById("videoContainer").appendChild(box);
           document.getElementById("videoContainer").appendChild(label);
+        });
+      }
+
+      const videoCanvas = document.getElementById("videoCanvas");
+      const videoStream = document.getElementById("videoStream");
+      const streamCtx = videoStream.getContext("2d");
+
+      // Modificar la función updateVideoStream
+      function updateVideoStream(imageData) {
+        return new Promise(async (resolve, reject) => {
+          try {
+            const img = new Image();
+            img.onload = async () => {
+              // Ajustar el tamaño del canvas al tamaño de la imagen
+              if (videoStream.width !== img.width) {
+                videoStream.width = img.width;
+                videoStream.height = img.height;
+
+                // Inicializar MediaRecorder si no existe
+                if (!mediaRecorder) {
+                  const stream = videoStream.captureStream(30); // 30 FPS
+                  mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: "video/webm;codecs=vp8",
+                    videoBitsPerSecond: 2500000, // 2.5 Mbps
+                  });
+
+                  mediaRecorder.ondataavailable = async (event) => {
+                    if (event.data.size > 0) {
+                      recordedChunks.push(event.data);
+
+                      // Agregar chunks al sourceBuffer cuando tengamos suficientes
+                      if (recordedChunks.length >= 5) {
+                        // Buffer de 5 frames
+                        const blob = new Blob(recordedChunks, {
+                          type: "video/webm",
+                        });
+                        const arrayBuffer = await blob.arrayBuffer();
+
+                        try {
+                          if (
+                            !sourceBuffer.updating &&
+                            mediaSource.readyState === "open"
+                          ) {
+                            sourceBuffer.appendBuffer(arrayBuffer);
+                            recordedChunks = []; // Limpiar buffer
+                          }
+                        } catch (e) {
+                          console.warn("Error adding buffer:", e);
+                        }
+                      }
+                    }
+                  };
+
+                  mediaRecorder.start(1000 / 30); // Capturar cada frame (30fps)
+                }
+              }
+
+              // Dibujar la imagen en el canvas
+              streamCtx.drawImage(img, 0, 0);
+              URL.revokeObjectURL(img.src);
+              resolve();
+            };
+
+            img.onerror = (err) => {
+              console.error("Error loading image:", err);
+              reject(err);
+            };
+
+            const blob = new Blob([imageData], { type: "image/jpeg" });
+            img.src = URL.createObjectURL(blob);
+          } catch (error) {
+            console.error("Error in updateVideoStream:", error);
+            reject(error);
+          }
         });
       }
 

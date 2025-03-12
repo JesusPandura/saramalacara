@@ -117,13 +117,6 @@
       #bufferCanvas {
         display: none;
       }
-
-      #videoCanvas {
-        backface-visibility: hidden;
-        transform: translateZ(0);
-        perspective: 1000;
-        will-change: transform;
-      }
     </style>
   </head>
   <body>
@@ -239,166 +232,21 @@
 
       let jsmpegPlayer;
       let frameBuffer = [];
-      const PERFORMANCE_SETTINGS = {
-        BUFFER_SIZE: 3,
-        FRAME_INTERVAL: 1000 / 60,
-        MIN_BUFFER_SIZE: 2,
-        MAX_WIDTH: 640,
-        JPEG_QUALITY: 0.8,
-        SCALE_FACTOR: 1.0,
-        AUTO_ADJUST: true,
-        TARGET_FPS: 30,
-      };
+      const BUFFER_SIZE = 5;
       let isProcessingBuffer = false;
       let isFirstFrame = true;
 
       let lastDrawTime = 0;
+      const FRAME_INTERVAL = 1000 / 30; // 30 FPS target
 
-      let frameTimestamps = [];
-      let currentFPS = 0;
+      // Optimizar el canvas
+      ctx.imageSmoothingEnabled = false;
 
-      // Crear dos canvas offscreen para double buffering
-      const backCanvas = document.createElement("canvas");
-      const backCtx = backCanvas.getContext("2d", {
-        alpha: false,
-        desynchronized: true,
-      });
-
-      const frontCanvas = document.createElement("canvas");
-      const frontCtx = frontCanvas.getContext("2d", {
-        alpha: false,
-        desynchronized: true,
-      });
-
-      // Función para intercambiar buffers suavemente
-      function swapBuffers(imageBitmap) {
-        // Preparar el back buffer
-        if (
-          backCanvas.width !== imageBitmap.width ||
-          backCanvas.height !== imageBitmap.height
-        ) {
-          backCanvas.width =
-            frontCanvas.width =
-            canvas.width =
-              imageBitmap.width;
-          backCanvas.height =
-            frontCanvas.height =
-            canvas.height =
-              imageBitmap.height;
-        }
-
-        // Dibujar nuevo frame en el back buffer
-        backCtx.drawImage(imageBitmap, 0, 0);
-
-        // Copiar back buffer al front buffer
-        frontCtx.drawImage(backCanvas, 0, 0);
-
-        // Aplicar una transición suave al canvas visible
-        ctx.globalAlpha = 1.0;
-        ctx.drawImage(frontCanvas, 0, 0);
-      }
-
-      // Función para redimensionar y optimizar frames
-      async function optimizeFrame(fullFrame) {
-        try {
-          const blob = new Blob([fullFrame], { type: "image/jpeg" });
-          const imageBitmap = await createImageBitmap(blob);
-
-          // Calcular dimensiones manteniendo aspecto
-          let targetWidth =
-            imageBitmap.width * PERFORMANCE_SETTINGS.SCALE_FACTOR;
-          let targetHeight =
-            imageBitmap.height * PERFORMANCE_SETTINGS.SCALE_FACTOR;
-
-          if (targetWidth > PERFORMANCE_SETTINGS.MAX_WIDTH) {
-            const ratio = PERFORMANCE_SETTINGS.MAX_WIDTH / targetWidth;
-            targetWidth *= ratio;
-            targetHeight *= ratio;
-          }
-
-          // Usar un canvas temporal para el redimensionamiento
-          const tempCanvas = document.createElement("canvas");
-          tempCanvas.width = targetWidth;
-          tempCanvas.height = targetHeight;
-          const tempCtx = tempCanvas.getContext("2d", {
-            alpha: false,
-            desynchronized: true,
-          });
-
-          // Aplicar optimizaciones de renderizado
-          tempCtx.imageSmoothingEnabled = true;
-          tempCtx.imageSmoothingQuality = "medium";
-
-          // Dibujar frame redimensionado
-          tempCtx.drawImage(imageBitmap, 0, 0, targetWidth, targetHeight);
-
-          // Liberar recursos
-          imageBitmap.close();
-
-          // Convertir a Blob con calidad ajustada
-          const optimizedBlob = await new Promise((resolve) => {
-            tempCanvas.toBlob(
-              resolve,
-              "image/jpeg",
-              PERFORMANCE_SETTINGS.JPEG_QUALITY
-            );
-          });
-
-          // Convertir Blob a ArrayBuffer
-          return new Uint8Array(await optimizedBlob.arrayBuffer());
-        } catch (error) {
-          console.error("Error optimizing frame:", error);
-          return fullFrame; // Retornar frame original si hay error
-        }
-      }
-
-      // Función para calcular y ajustar FPS
-      function updateFPS() {
-        const now = performance.now();
-        frameTimestamps.push(now);
-
-        // Mantener solo los últimos 30 frames para el cálculo
-        if (frameTimestamps.length > 30) {
-          frameTimestamps.shift();
-        }
-
-        if (frameTimestamps.length > 1) {
-          const timeElapsed = now - frameTimestamps[0];
-          currentFPS = (frameTimestamps.length / timeElapsed) * 1000;
-
-          // Auto-ajuste de calidad basado en FPS
-          if (PERFORMANCE_SETTINGS.AUTO_ADJUST) {
-            if (currentFPS < PERFORMANCE_SETTINGS.TARGET_FPS - 5) {
-              // Reducir calidad si FPS está bajo
-              PERFORMANCE_SETTINGS.SCALE_FACTOR = Math.max(
-                0.5,
-                PERFORMANCE_SETTINGS.SCALE_FACTOR - 0.1
-              );
-              PERFORMANCE_SETTINGS.JPEG_QUALITY = Math.max(
-                0.6,
-                PERFORMANCE_SETTINGS.JPEG_QUALITY - 0.1
-              );
-            } else if (currentFPS > PERFORMANCE_SETTINGS.TARGET_FPS + 5) {
-              // Aumentar calidad si FPS está alto
-              PERFORMANCE_SETTINGS.SCALE_FACTOR = Math.min(
-                1.0,
-                PERFORMANCE_SETTINGS.SCALE_FACTOR + 0.1
-              );
-              PERFORMANCE_SETTINGS.JPEG_QUALITY = Math.min(
-                0.9,
-                PERFORMANCE_SETTINGS.JPEG_QUALITY + 0.1
-              );
-            }
-          }
-        }
-      }
-
-      // Modificar processFrame para incluir optimización
-      async function processFrame(fullFrame) {
+      function processFrame(fullFrame) {
         const currentTime = performance.now();
-
-        if (currentTime - lastDrawTime < PERFORMANCE_SETTINGS.FRAME_INTERVAL) {
-          if (frameBuffer.length < PERFORMANCE_SETTINGS.BUFFER_SIZE) {
+        if (currentTime - lastDrawTime < FRAME_INTERVAL) {
+          // Si no ha pasado suficiente tiempo, agregar al buffer
+          if (frameBuffer.length < BUFFER_SIZE) {
             frameBuffer.push(fullFrame);
           }
           return;
@@ -406,42 +254,30 @@
 
         lastDrawTime = currentTime;
 
-        try {
-          // Optimizar frame antes de procesarlo
-          const optimizedFrame = await optimizeFrame(fullFrame);
-          const blob = new Blob([optimizedFrame], { type: "image/jpeg" });
+        // Crear un blob y dibujar el frame
+        const blob = new Blob([fullFrame], { type: "image/jpeg" });
+        const img = new Image();
 
-          const imageBitmap = await createImageBitmap(blob, {
-            imageOrientation: "none",
-            premultiplyAlpha: "none",
-            colorSpaceConversion: "none",
-          });
-
-          requestAnimationFrame(() => {
-            swapBuffers(imageBitmap);
-            imageBitmap.close();
-            updateFPS();
-
-            // Actualizar status con FPS
-            status.textContent = `Streaming... Buffer: ${frameBuffer.length}/${
-              PERFORMANCE_SETTINGS.BUFFER_SIZE
-            } FPS: ${Math.round(currentFPS)}`;
-          });
-
-          if (frameBuffer.length > 0) {
-            const nextFrame = frameBuffer.shift();
-            processFrame(nextFrame);
+        img.onload = () => {
+          // Ajustar el tamaño del canvas si es necesario
+          if (canvas.width !== img.width || canvas.height !== img.height) {
+            canvas.width = img.width;
+            canvas.height = img.height;
           }
-        } catch (error) {
-          console.error("Error processing frame:", error);
-        }
-      }
 
-      // Optimizar el canvas principal
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
+          ctx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(img.src);
+
+          // Procesar el siguiente frame del buffer si existe
+          if (frameBuffer.length > 0) {
+            requestAnimationFrame(() => {
+              processFrame(frameBuffer.shift());
+            });
+          }
+        };
+
+        img.src = URL.createObjectURL(blob);
+      }
 
       function setupEventListeners() {
         if (!client) return;
@@ -482,7 +318,7 @@
               expectedChunks = metadata.chunks;
               currentFrame = new Array(expectedChunks).fill(null);
               receivedChunks = 0;
-              status.textContent = `Buffering... (${frameBuffer.length}/${PERFORMANCE_SETTINGS.BUFFER_SIZE})`;
+              status.textContent = `Buffering... (${frameBuffer.length}/${BUFFER_SIZE})`;
             } else if (topic.includes("/frame/")) {
               const frameIndex = parseInt(topic.split("/").pop());
               currentFrame[frameIndex] = message;
@@ -502,28 +338,10 @@
                     }
                   });
 
-                  // Si el buffer está vacío, procesar inmediatamente
-                  if (frameBuffer.length === 0 && !isProcessingBuffer) {
-                    if (
-                      receivedChunks >= PERFORMANCE_SETTINGS.MIN_BUFFER_SIZE
-                    ) {
-                      processFrame(fullFrame);
-                    } else {
-                      frameBuffer.push(fullFrame);
-                    }
-                  } else {
-                    if (
-                      frameBuffer.length >= PERFORMANCE_SETTINGS.BUFFER_SIZE
-                    ) {
-                      // Mantener frames más recientes pero no eliminar demasiados
-                      frameBuffer = frameBuffer.slice(
-                        -PERFORMANCE_SETTINGS.MIN_BUFFER_SIZE
-                      );
-                    }
-                    frameBuffer.push(fullFrame);
-                  }
+                  // Procesar el frame
+                  processFrame(fullFrame);
 
-                  // Procesar detección cada 5 frames usando el último frame completo
+                  // Procesar detección cada 5 frames
                   if (receivedChunks % 5 === 0) {
                     const blob = new Blob([fullFrame], { type: "image/jpeg" });
                     detectObjects(blob).then((result) => {
@@ -536,7 +354,7 @@
                   // Resetear para el siguiente frame
                   receivedChunks = 0;
                   currentFrame = new Array(expectedChunks).fill(null);
-                  status.textContent = `Streaming... Buffer: ${frameBuffer.length}/${PERFORMANCE_SETTINGS.BUFFER_SIZE}`;
+                  status.textContent = `Streaming... Buffer: ${frameBuffer.length}/${BUFFER_SIZE}`;
                 } catch (err) {
                   console.error("Error procesando frame:", err);
                   status.textContent = "Error procesando frame";
@@ -728,3 +546,5 @@
     </script>
   </body>
 </html>
+
+rendeciriza con bufferin los frmaes recibidos.
