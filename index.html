@@ -478,6 +478,9 @@
         const scaleX = rect.width / canvas.width;
         const scaleY = rect.height / canvas.height;
 
+        // Variable para rastrear si se detectó una persona
+        let personDetected = false;
+
         detections.forEach((detection) => {
           const [x1, y1, x2, y2] = detection.bbox;
           const confidence = Math.round(detection.confidence * 100);
@@ -502,7 +505,67 @@
 
           document.getElementById("videoContainer").appendChild(box);
           document.getElementById("videoContainer").appendChild(label);
+
+          // Verificar si la detección es una persona
+          if (detection.class.toLowerCase() === "person" && confidence >= 20) {
+            personDetected = true;
+          }
         });
+
+        // Guardar las detecciones para referencia
+        document.querySelector("#videoContainer").__lastDetections = detections;
+
+        // Si se detectó una persona, enviar alerta a Telegram
+        if (personDetected) {
+          sendTelegramAlert();
+        }
+      }
+
+      // Agregar función para enviar alertas a Telegram
+      let lastAlertTime = 0;
+      const ALERT_COOLDOWN = 30000; // 30 segundos entre alertas
+
+      function sendTelegramAlert() {
+        const now = Date.now();
+
+        // Evitar enviar alertas demasiado frecuentes
+        if (now - lastAlertTime < ALERT_COOLDOWN) {
+          console.log("Alerta en cooldown, esperando...");
+          return;
+        }
+
+        lastAlertTime = now;
+
+        const botToken = "8031077837:AAESwKFyL4iRgTrL7qqQr3-h6GeDb9puOrA";
+        const chatId = "7855355450";
+        const message = "¡ALERTA! Persona detectada en la cámara.";
+        const timestamp = new Date().toLocaleString();
+        const fullMessage = `${message}\nHora: ${timestamp}`;
+
+        const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+        fetch(telegramApiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: fullMessage,
+            parse_mode: "HTML",
+          }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.ok) {
+              console.log("Alerta enviada a Telegram con éxito");
+            } else {
+              console.error("Error al enviar alerta a Telegram:", data);
+            }
+          })
+          .catch((error) => {
+            console.error("Error en la solicitud a la API de Telegram:", error);
+          });
       }
 
       setupEventListeners();
