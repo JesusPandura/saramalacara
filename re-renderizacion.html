@@ -232,51 +232,57 @@
 
       let jsmpegPlayer;
       let frameBuffer = [];
-      const BUFFER_SIZE = 5;
+      const BUFFER_SIZE = 10;
       let isProcessingBuffer = false;
-      let isFirstFrame = true;
 
-      let lastDrawTime = 0;
-      const FRAME_INTERVAL = 1000 / 30; // 30 FPS target
+      async function setupVideoBuffer() {
+        rtcVideo = document.getElementById("rtcVideo");
+        mediaSource = new MediaSource();
+        rtcVideo.src = URL.createObjectURL(mediaSource);
 
-      // Optimizar el canvas
-      ctx.imageSmoothingEnabled = false;
+        return new Promise((resolve) => {
+          mediaSource.addEventListener("sourceopen", () => {
+            const mimeType = "video/webm;codecs=vp8";
+            sourceBuffer = mediaSource.addSourceBuffer(mimeType);
+            sourceBuffer.mode = "sequence";
+            resolve();
+          });
+        });
+      }
 
-      function processFrame(fullFrame) {
-        const currentTime = performance.now();
-        if (currentTime - lastDrawTime < FRAME_INTERVAL) {
-          // Si no ha pasado suficiente tiempo, agregar al buffer
-          if (frameBuffer.length < BUFFER_SIZE) {
-            frameBuffer.push(fullFrame);
+      function initializeJSMPEG() {
+        jsmpegPlayer = new JSMpeg.Player(null, {
+          canvas: canvas,
+          audio: false,
+          videoBufferSize: 1024 * 1024 * 4,
+          preserveDrawingBuffer: true,
+          streaming: true,
+          onPlay: () => {
+            console.log("Playback started");
+          },
+        });
+      }
+
+      function processFrameBuffer() {
+        if (isProcessingBuffer || frameBuffer.length < 1) return;
+
+        isProcessingBuffer = true;
+        const frame = frameBuffer.shift();
+
+        try {
+          if (jsmpegPlayer) {
+            jsmpegPlayer.write(frame);
           }
-          return;
+        } catch (error) {
+          console.error("Error processing frame:", error);
         }
 
-        lastDrawTime = currentTime;
+        isProcessingBuffer = false;
 
-        // Crear un blob y dibujar el frame
-        const blob = new Blob([fullFrame], { type: "image/jpeg" });
-        const img = new Image();
-
-        img.onload = () => {
-          // Ajustar el tamaño del canvas si es necesario
-          if (canvas.width !== img.width || canvas.height !== img.height) {
-            canvas.width = img.width;
-            canvas.height = img.height;
-          }
-
-          ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(img.src);
-
-          // Procesar el siguiente frame del buffer si existe
-          if (frameBuffer.length > 0) {
-            requestAnimationFrame(() => {
-              processFrame(frameBuffer.shift());
-            });
-          }
-        };
-
-        img.src = URL.createObjectURL(blob);
+        // Procesar el siguiente frame
+        if (frameBuffer.length > 0) {
+          requestAnimationFrame(processFrameBuffer);
+        }
       }
 
       function setupEventListeners() {
@@ -311,18 +317,22 @@
         });
 
         client.on("message", async (topic, message) => {
+          console.log(`Mensaje recibido en ${topic}`); // Debug log
+
           try {
             if (topic.endsWith("/metadata")) {
               const metadata = JSON.parse(message.toString());
+              console.log("Metadata recibida:", metadata); // Debug log
               deviceId = metadata.deviceId;
               expectedChunks = metadata.chunks;
               currentFrame = new Array(expectedChunks).fill(null);
               receivedChunks = 0;
-              status.textContent = `Buffering... (${frameBuffer.length}/${BUFFER_SIZE})`;
+              status.textContent = `Recibiendo frame (0/${expectedChunks})`;
             } else if (topic.includes("/frame/")) {
               const frameIndex = parseInt(topic.split("/").pop());
               currentFrame[frameIndex] = message;
               receivedChunks++;
+              status.textContent = `Recibiendo frame (${receivedChunks}/${expectedChunks})`;
 
               if (receivedChunks === expectedChunks) {
                 try {
@@ -338,23 +348,33 @@
                     }
                   });
 
-                  // Procesar el frame
-                  processFrame(fullFrame);
+                  // Dibujar directamente en el canvas
+                  const blob = new Blob([fullFrame], { type: "image/jpeg" });
+                  const img = new Image();
+                  img.onload = () => {
+                    // Ajustar el tamaño del canvas si es necesario
+                    if (canvas.width !== img.width) {
+                      canvas.width = img.width;
+                      canvas.height = img.height;
+                    }
+                    ctx.drawImage(img, 0, 0);
+                    URL.revokeObjectURL(img.src);
 
-                  // Procesar detección cada 5 frames
-                  if (receivedChunks % 5 === 0) {
-                    const blob = new Blob([fullFrame], { type: "image/jpeg" });
-                    detectObjects(blob).then((result) => {
-                      if (result && result.status === "success") {
-                        drawDetections(result.detections);
-                      }
-                    });
-                  }
+                    // Procesar detección cada 5 frames
+                    if (receivedChunks % 5 === 0) {
+                      detectObjects(blob).then((result) => {
+                        if (result && result.status === "success") {
+                          drawDetections(result.detections);
+                        }
+                      });
+                    }
+                  };
+                  img.src = URL.createObjectURL(blob);
 
                   // Resetear para el siguiente frame
                   receivedChunks = 0;
                   currentFrame = new Array(expectedChunks).fill(null);
-                  status.textContent = `Streaming... Buffer: ${frameBuffer.length}/${BUFFER_SIZE}`;
+                  status.textContent = "Frame procesado";
                 } catch (err) {
                   console.error("Error procesando frame:", err);
                   status.textContent = "Error procesando frame";
@@ -396,7 +416,7 @@
           console.log("Sending detection request to server...");
 
           const response = await fetch(
-            "https://concrete-monkey-selected.ngrok-free.app/detect",
+            "https://willingly-worthy-pig.ngrok-free.app/detect",
             {
               method: "POST",
               body: formData,
@@ -458,6 +478,9 @@
         const scaleX = rect.width / canvas.width;
         const scaleY = rect.height / canvas.height;
 
+        // Variable para rastrear si se detectó una persona
+        let personDetected = false;
+
         detections.forEach((detection) => {
           const [x1, y1, x2, y2] = detection.bbox;
           const confidence = Math.round(detection.confidence * 100);
@@ -482,7 +505,67 @@
 
           document.getElementById("videoContainer").appendChild(box);
           document.getElementById("videoContainer").appendChild(label);
+
+          // Verificar si la detección es una persona
+          if (detection.class.toLowerCase() === "person" && confidence >= 20) {
+            personDetected = true;
+          }
         });
+
+        // Guardar las detecciones para referencia
+        document.querySelector("#videoContainer").__lastDetections = detections;
+
+        // Si se detectó una persona, enviar alerta a Telegram
+        if (personDetected) {
+          sendTelegramAlert();
+        }
+      }
+
+      // Agregar función para enviar alertas a Telegram
+      let lastAlertTime = 0;
+      const ALERT_COOLDOWN = 30000; // 30 segundos entre alertas
+
+      function sendTelegramAlert() {
+        const now = Date.now();
+
+        // Evitar enviar alertas demasiado frecuentes
+        if (now - lastAlertTime < ALERT_COOLDOWN) {
+          console.log("Alerta en cooldown, esperando...");
+          return;
+        }
+
+        lastAlertTime = now;
+
+        const botToken = "8031077837:AAESwKFyL4iRgTrL7qqQr3-h6GeDb9puOrA";
+        const chatId = "7855355450";
+        const message = "¡ALERTA! Persona detectada en la cámara.";
+        const timestamp = new Date().toLocaleString();
+        const fullMessage = `${message}\nHora: ${timestamp}`;
+
+        const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+        fetch(telegramApiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: fullMessage,
+            parse_mode: "HTML",
+          }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.ok) {
+              console.log("Alerta enviada a Telegram con éxito");
+            } else {
+              console.error("Error al enviar alerta a Telegram:", data);
+            }
+          })
+          .catch((error) => {
+            console.error("Error en la solicitud a la API de Telegram:", error);
+          });
       }
 
       setupEventListeners();
@@ -546,5 +629,3 @@
     </script>
   </body>
 </html>
-
-rendeciriza con bufferin los frmaes recibidos.

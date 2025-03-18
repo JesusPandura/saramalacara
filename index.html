@@ -537,35 +537,44 @@
         lastAlertTime = now;
 
         const botToken = "8031077837:AAESwKFyL4iRgTrL7qqQr3-h6GeDb9puOrA";
-        const chatId = "7855355450";
+        const chatIds = ["7855355450", "7270661381"]; // Array con ambos chat IDs
         const message = "¡ALERTA! Persona detectada en la cámara.";
         const timestamp = new Date().toLocaleString();
         const fullMessage = `${message}\nHora: ${timestamp}`;
 
         const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
-        fetch(telegramApiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: fullMessage,
-            parse_mode: "HTML",
-          }),
-        })
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.ok) {
-              console.log("Alerta enviada a Telegram con éxito");
-            } else {
-              console.error("Error al enviar alerta a Telegram:", data);
-            }
+        // Enviar mensaje a cada chat ID
+        chatIds.forEach((chatId) => {
+          fetch(telegramApiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: fullMessage,
+              parse_mode: "HTML",
+            }),
           })
-          .catch((error) => {
-            console.error("Error en la solicitud a la API de Telegram:", error);
-          });
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.ok) {
+                console.log(`Alerta enviada con éxito a chat ID: ${chatId}`);
+              } else {
+                console.error(
+                  `Error al enviar alerta a chat ID ${chatId}:`,
+                  data
+                );
+              }
+            })
+            .catch((error) => {
+              console.error(
+                `Error en la solicitud a la API de Telegram para chat ID ${chatId}:`,
+                error
+              );
+            });
+        });
       }
 
       setupEventListeners();
