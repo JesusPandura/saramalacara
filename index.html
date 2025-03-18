@@ -31,6 +31,8 @@
         padding: 10px;
         box-sizing: border-box;
         overflow: hidden;
+        background: #000;
+        box-shadow: 0 0 10px rgba(0,0,0,0.5);
       }
 
       #status {
@@ -52,6 +54,10 @@
         height: auto;
         display: block;
         border: none;
+        image-rendering: -webkit-optimize-contrast;
+        image-rendering: crisp-edges;
+        image-rendering: pixelated;
+        -ms-interpolation-mode: nearest-neighbor;
       }
 
       * {
@@ -217,9 +223,12 @@
       // Configuración WebRTC
       const mediaStreamConstraints = {
         video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
           frameRate: { ideal: 30 },
+          aspectRatio: { ideal: 16/9 },
+          facingMode: "environment",
+          quality: { ideal: 0.9 },
         },
       };
 
@@ -254,9 +263,14 @@
         jsmpegPlayer = new JSMpeg.Player(null, {
           canvas: canvas,
           audio: false,
-          videoBufferSize: 1024 * 1024 * 4,
+          videoBufferSize: 1024 * 1024 * 8,
           preserveDrawingBuffer: true,
           streaming: true,
+          maxAudioLag: 0.5,
+          videoBufferSize: 4096 * 4096,
+          progressive: true,
+          chunkSize: 65536,
+          decodeFirstFrame: true,
           onPlay: () => {
             console.log("Playback started");
           },
@@ -635,6 +649,22 @@
         - URL: ${window.location.href}
         - User Agent: ${navigator.userAgent}`);
         });
+
+      // Agregar configuración de calidad del canvas
+      function setupCanvas() {
+        const canvas = document.getElementById("videoCanvas");
+        const ctx = canvas.getContext("2d", {
+          alpha: false,
+          desynchronized: true,
+          willReadFrequently: false,
+        });
+        
+        // Mejorar la calidad del renderizado
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        
+        return ctx;
+      }
     </script>
   </body>
 </html>
