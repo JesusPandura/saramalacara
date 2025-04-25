@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 Cámara MQTT</title>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"
+      type="text/javascript"
+    ></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        height: 100vh;
+        width: 100vw;
+        background-color: #000;
+      }
+
+      #camera-view {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background-color: #000;
+      }
+
+      .controls {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 100;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 10px;
+        border-radius: 5px;
+        transition: opacity 0.3s ease;
+        opacity: 0;
+      }
+
+      .controls:hover,
+      .controls.visible {
+        opacity: 1;
+      }
+
+      #show-controls {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 99;
+        background-color: rgba(0, 0, 0, 0.3);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      button {
+        background-color: #4caf50;
+        border: none;
+        color: white;
+        padding: 8px 16px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 14px;
+        margin: 5px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+
+      button:hover {
+        background-color: #45a049;
+      }
+
+      #status {
+        color: white;
+        margin-top: 5px;
+        font-size: 14px;
+      }
+
+      input {
+        padding: 6px;
+        margin: 5px;
+        width: 200px;
+      }
+
+      label {
+        color: white;
+        display: inline-block;
+        width: 60px;
+        text-align: right;
+        margin-right: 5px;
+      }
+
+      .loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 24px;
+        text-align: center;
+      }
+
+      #fps-counter {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        color: lime;
+        font-size: 14px;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 3px;
+        z-index: 100;
+      }
+
+      #fullscreen-btn {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        z-index: 100;
+        background-color: rgba(0, 0, 0, 0.5);
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+
+      /* Eliminar barra azul al tocar en dispositivos móviles */
+      * {
+        -webkit-tap-highlight-color: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading-message" class="loading">
+      <div>Esperando conexión...</div>
+      <div id="loading-details" style="font-size: 16px; margin-top: 10px"></div>
+    </div>
+
+    <img
+      id="camera-view"
+      src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVZP/2Q=="
+      alt="Cámara ESP32"
+      style="display: none"
+    />
+
+    <button id="show-controls">⚙</button>
+
+    <div class="controls" id="controls-panel">
+      <div>
+        <label for="mqtt-broker">Broker:</label>
+        <input
+          type="text"
+          id="mqtt-broker"
+          value="ws://test.mosquitto.org:8080"
+        />
+      </div>
+      <div>
+        <label for="mqtt-topic">Topic:</label>
+        <input type="text" id="mqtt-topic" value="esp32camera/sara" />
+      </div>
+      <button id="connect-button" onclick="connectMQTT()">Conectar</button>
+      <button id="disconnect-button" onclick="disconnectMQTT()" disabled>
+        Desconectar
+      </button>
+      <div id="status">No conectado</div>
+    </div>
+
+    <div id="fps-counter">0 FPS</div>
+    <button id="fullscreen-btn">Pantalla Completa</button>
+
+    <script>
+      let mqttClient = null;
+      let mqttConnected = false;
+      const statusElement = document.getElementById("status");
+      const cameraView = document.getElementById("camera-view");
+      const connectButton = document.getElementById("connect-button");
+      const disconnectButton = document.getElementById("disconnect-button");
+      const loadingMessage = document.getElementById("loading-message");
+      const loadingDetails = document.getElementById("loading-details");
+      const fpsCounter = document.getElementById("fps-counter");
+      const controlsPanel = document.getElementById("controls-panel");
+      const showControlsBtn = document.getElementById("show-controls");
+      const fullscreenBtn = document.getElementById("fullscreen-btn");
+
+      let messageReceived = false;
+      let frameCount = 0;
+      let lastFrameTime = Date.now();
+      let fps = 0;
+
+      // Configuración para mostrar/ocultar controles
+      showControlsBtn.addEventListener("click", () => {
+        controlsPanel.classList.toggle("visible");
+      });
+
+      // Función para activar pantalla completa
+      fullscreenBtn.addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch((err) => {
+            console.log(`Error al intentar pantalla completa: ${err.message}`);
+          });
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          }
+        }
+      });
+
+      // Función para mostrar la imagen cuando llega el primer mensaje
+      function showCameraView() {
+        if (!messageReceived) {
+          messageReceived = true;
+          cameraView.style.display = "block";
+          loadingMessage.style.display = "none";
+
+          // Ocultar el botón de mostrar controles después de 3 segundos
+          setTimeout(() => {
+            controlsPanel.classList.remove("visible");
+          }, 3000);
+        }
+      }
+
+      // Calcular FPS
+      function updateFPS() {
+        frameCount++;
+        const now = Date.now();
+        const elapsed = now - lastFrameTime;
+
+        if (elapsed >= 1000) {
+          fps = Math.round((frameCount * 1000) / elapsed);
+          fpsCounter.textContent = fps + " FPS";
+          frameCount = 0;
+          lastFrameTime = now;
+        }
+      }
+
+      // Función para conectar al broker MQTT
+      function connectMQTT() {
+        if (mqttConnected) return;
+
+        const brokerUrl = document.getElementById("mqtt-broker").value;
+        const topic = document.getElementById("mqtt-topic").value;
+
+        // Extraer el host y puerto del broker WebSocket
+        let url;
+        try {
+          url = new URL(brokerUrl);
+        } catch (e) {
+          statusElement.textContent = "URL inválida: " + brokerUrl;
+          loadingDetails.textContent = "URL inválida: " + brokerUrl;
+          return;
+        }
+
+        let host = url.hostname;
+        let port = url.port || 8080; // Puerto WebSocket para Mosquitto público
+
+        // ID de cliente aleatorio para evitar conflictos
+        const clientId = "webclient_" + Math.random().toString(16).substr(2, 8);
+
+        // Crear y configurar el cliente MQTT
+        try {
+          mqttClient = new Paho.MQTT.Client(host, Number(port), clientId);
+        } catch (error) {
+          statusElement.textContent =
+            "Error al crear cliente: " + error.message;
+          loadingDetails.textContent =
+            "Error al crear cliente: " + error.message;
+          return;
+        }
+
+        // Definir callbacks
+        mqttClient.onConnectionLost = onConnectionLost;
+        mqttClient.onMessageArrived = onMessageArrived;
+
+        // Conectar al broker
+        statusElement.textContent = "Conectando...";
+        loadingMessage.textContent = "Conectando al broker MQTT...";
+        loadingDetails.textContent = "Intentando conectar a " + brokerUrl;
+
+        const connectOptions = {
+          onSuccess: onConnect,
+          onFailure: onFailure,
+          useSSL: brokerUrl.startsWith("wss://"),
+          timeout: 30, // Timeout más largo para broker público
+        };
+
+        try {
+          mqttClient.connect(connectOptions);
+        } catch (error) {
+          statusElement.textContent = "Error al conectar: " + error.message;
+          loadingMessage.textContent = "Error de conexión";
+          loadingDetails.textContent = error.message;
+        }
+      }
+
+      // Manejar conexión exitosa
+      function onConnect() {
+        mqttConnected = true;
+        const topic = document.getElementById("mqtt-topic").value;
+
+        statusElement.textContent = "Conectado";
+        loadingMessage.textContent = "Esperando imágenes...";
+        loadingDetails.textContent = "Suscrito al topic: " + topic;
+
+        connectButton.disabled = true;
+        disconnectButton.disabled = false;
+
+        // Suscribirse al topic de la cámara
+        mqttClient.subscribe(topic, { qos: 0 });
+        console.log("Suscrito al topic: " + topic);
+      }
+
+      // Manejar error de conexión
+      function onFailure(error) {
+        mqttConnected = false;
+        statusElement.textContent = "Error: " + error.errorMessage;
+        loadingMessage.textContent = "Error de conexión";
+        loadingDetails.textContent = error.errorMessage;
+
+        connectButton.disabled = false;
+        disconnectButton.disabled = true;
+      }
+
+      // Manejar pérdida de conexión
+      function onConnectionLost(responseObject) {
+        mqttConnected = false;
+        if (responseObject.errorCode !== 0) {
+          statusElement.textContent =
+            "Conexión perdida: " + responseObject.errorMessage;
+          loadingMessage.style.display = "block";
+          loadingMessage.textContent = "Conexión perdida. Reconectando...";
+          loadingDetails.textContent = responseObject.errorMessage;
+          cameraView.style.display = "none";
+          messageReceived = false;
+        } else {
+          statusElement.textContent = "Desconectado";
+          loadingMessage.style.display = "block";
+          loadingMessage.textContent = "Desconectado";
+          loadingDetails.textContent = "";
+          cameraView.style.display = "none";
+        }
+
+        connectButton.disabled = false;
+        disconnectButton.disabled = true;
+
+        // Intentar reconectar automáticamente después de 5 segundos
+        if (responseObject.errorCode !== 0) {
+          setTimeout(connectMQTT, 5000);
+        }
+      }
+
+      // Manejar mensaje recibido
+      function onMessageArrived(message) {
+        try {
+          // Mostrar la imagen cuando llega el primer mensaje
+          showCameraView();
+
+          // Convertir el payload binario a Base64 para mostrarlo en la imagen
+          const payload = message.payloadBytes;
+          const binary = String.fromCharCode.apply(null, payload);
+          const base64 = window.btoa(binary);
+
+          // Actualizar la imagen
+          cameraView.src = "data:image/jpeg;base64," + base64;
+
+          // Actualizar contador de FPS
+          updateFPS();
+        } catch (error) {
+          console.error("Error al procesar mensaje:", error);
+          statusElement.textContent = "Error al procesar imagen";
+        }
+      }
+
+      // Función para desconectar
+      function disconnectMQTT() {
+        if (mqttClient && mqttConnected) {
+          mqttClient.disconnect();
+          mqttConnected = false;
+          statusElement.textContent = "Desconectado";
+          loadingMessage.style.display = "block";
+          loadingMessage.textContent = "Desconectado";
+          loadingDetails.textContent = "";
+          cameraView.style.display = "none";
+          messageReceived = false;
+
+          connectButton.disabled = false;
+          disconnectButton.disabled = true;
+        }
+      }
+
+      // Auto-conectar después de cargar la página
+      document.addEventListener("DOMContentLoaded", function () {
+        // Pequeña espera para asegurar que todo esté cargado
+        setTimeout(connectMQTT, 1000);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ESP32 Camera Stream</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      #videoContainer {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-color: #000;
+      }
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+      #status {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        z-index: 10;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="videoContainer">
+      <img
+        id="videoImage"
+        src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACv/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVIP/2Q=="
+      />
+    </div>
+    <div id="status">Connecting...</div>
+
+    <script>
+      const videoImage = document.getElementById("videoImage");
+      const statusDiv = document.getElementById("status");
+
+      let ws;
+      const clientId = "web_" + Math.random().toString(36).substr(2, 9);
+      const esp32Id = "esp32";
+      let isStreaming = false;
+
+      function updateStatus(message) {
+        statusDiv.textContent = message;
+        console.log(message);
+      }
+
+      function connectWebSocket() {
+        ws = new WebSocket(`ws://192.168.1.11:8000/ws/${clientId}`);
+
+        ws.onopen = () => {
+          updateStatus("Connecting to camera...");
+
+          // Enviar mensaje de oferta para iniciar el stream
+          const offer = {
+            type: "offer",
+            target: esp32Id,
+            sdp: {
+              type: "offer",
+              sdp: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:client\r\na=ice-pwd:clientpwd\r\na=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\r\na=setup:actpass\r\na=mid:0\r\na=recvonly\r\na=rtpmap:96 H264/90000\r\na=rtcp-fb:96 nack\r\na=rtcp-fb:96 nack pli\r\na=rtcp-fb:96 ccm fir\r\n",
+            },
+          };
+
+          ws.send(JSON.stringify(offer));
+        };
+
+        ws.onmessage = async (event) => {
+          try {
+            // Verificar si el mensaje es binario (frame de video)
+            if (event.data instanceof Blob) {
+              // Procesar frame de video
+              const blob = event.data;
+
+              // Convertir Blob a URL y mostrar en la imagen
+              const imageUrl = URL.createObjectURL(blob);
+              videoImage.src = imageUrl;
+
+              // Limpieza de la URL anterior después de cargar
+              videoImage.onload = () => {
+                URL.revokeObjectURL(imageUrl);
+              };
+
+              if (!isStreaming) {
+                updateStatus("Streaming...");
+                isStreaming = true;
+              }
+            } else {
+              // Mensaje de texto (señalización)
+              const message = JSON.parse(event.data);
+
+              if (message.type === "answer") {
+                updateStatus("Connected");
+
+                // Ocultar el estado después de 3 segundos
+                setTimeout(() => {
+                  statusDiv.style.opacity = "0";
+                  setTimeout(() => {
+                    statusDiv.style.display = "none";
+                  }, 500);
+                }, 3000);
+              }
+            }
+          } catch (e) {
+            console.error("Error handling message:", e);
+            updateStatus("Error: " + e.message);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error);
+          updateStatus("Connection error - retrying in 5s");
+
+          // Reintentar conexión después de 5 segundos
+          setTimeout(startStream, 5000);
+        };
+
+        ws.onclose = () => {
+          updateStatus("Connection lost - retrying in 5s");
+          isStreaming = false;
+
+          // Reintentar conexión después de 5 segundos
+          setTimeout(startStream, 5000);
+        };
+      }
+
+      function startStream() {
+        try {
+          updateStatus("Connecting...");
+          isStreaming = false;
+          connectWebSocket();
+        } catch (e) {
+          console.error("Error starting stream:", e);
+          updateStatus("Error: " + e.message + " - retrying in 5s");
+
+          // Reintentar conexión después de 5 segundos
+          setTimeout(startStream, 5000);
+        }
+      }
+
+      // Iniciar stream automáticamente al cargar la página
+      window.addEventListener("load", startStream);
+
+      // Permitir al usuario hacer clic en cualquier parte para entrar/salir de pantalla completa
+      document.addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch((err) => {
+            console.log(
+              `Error attempting to enable fullscreen: ${err.message}`
+            );
+          });
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          }
+        }
+      });
+    </script>
+  </body>
+</html>
