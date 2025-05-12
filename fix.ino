@@ -1146,15 +1146,7 @@ void setup() {
   // Intentar conectar al iPhone primero
   Serial.println("Intentando conectar a red iPhone...");
   
-  // Limpiar configuración WiFi anterior
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  delay(100);
-  
-  // Configurar IP estática para iPhone
-  if (!WiFi.config(local_IP_iphone, gateway_iphone, subnet_iphone, primaryDNS_iphone, secondaryDNS_iphone)) {
-    Serial.println("Error en configuración IP estática iPhone");
-  }
-  
+  // Para iPhone, usar DHCP en lugar de IP estática
   WiFi.begin(ssid_iphone, password_iphone);    
 
   Serial.print("Conectando a ");

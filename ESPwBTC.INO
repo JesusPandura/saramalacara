@@ -14,8 +14,8 @@ const char* ssid = "Megacable_2.4G_454A";
 const char* password = "pizzadepeperoni123";             // Tu contraseña WiFi
 
 // Servidor de señalización - CAMBIA ESTA IP POR LA QUE MUESTRA EL SERVIDOR PYTHON
-const char* serverIP = "192.168.1.11"; // <-- CAMBIA ESTA IP
-const int serverPort = 8000;
+const char* serverIP = "willingly-worthy-pig.ngrok-free.app"; // <-- CAMBIA ESTA IP
+const int serverPort = 10000;
 
 // WebSocket client
 WebSocketsClient webSocket;
@@ -68,7 +68,7 @@ void setup() {
   Serial.println(serverIP);
 
   // Conectar al servidor de señalización
-  webSocket.begin(serverIP, serverPort, "/ws/esp32");
+  webSocket.beginSSL(serverIP, serverPort, "/ws/esp32");
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
   
