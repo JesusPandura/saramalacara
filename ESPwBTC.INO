@@ -14,8 +14,8 @@ const char* ssid = "Megacable_2.4G_454A";
 const char* password = "pizzadepeperoni123";             // Tu contraseña WiFi
 
 // Servidor de señalización - CAMBIA ESTA IP POR LA QUE MUESTRA EL SERVIDOR PYTHON
-const char* serverIP = "willingly-worthy-pig.ngrok-free.app"; // <-- CAMBIA ESTA IP
-const int serverPort = 10000;
+const char* serverIP = "clever-koi-freely.ngrok-free.app"; // <-- CAMBIA ESTA IP
+const int serverPort = 443; // Cambiado a 443 para HTTPS
 
 // WebSocket client
 WebSocketsClient webSocket;
