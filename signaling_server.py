@@ -4,6 +4,10 @@ import uvicorn
 import json
 import asyncio
 import socket
+import os
+import cv2
+import numpy as np
+from datetime import datetime, timedelta
 
 def get_local_ip():
     try:
@@ -22,8 +26,23 @@ app = FastAPI()
 # Store connected clients
 connected_clients = {}
 
+# Variables para grabación de video
+RECORDINGS_DIR = 'recordings'
+FRAME_WIDTH = 640  # Ajusta según tu cámara
+FRAME_HEIGHT = 480  # Ajusta según tu cámara
+FPS = 15  # Ajusta según tu cámara
+RECORD_INTERVAL = 5 * 60  # 5 minutos en segundos
+
+if not os.path.exists(RECORDINGS_DIR):
+    os.makedirs(RECORDINGS_DIR)
+
+video_writer = None
+frames_buffer = []
+recording_start_time = None
+
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    global video_writer, frames_buffer, recording_start_time
     print(f"Nuevo cliente conectado: {client_id}")
     await websocket.accept()
     connected_clients[client_id] = websocket
@@ -55,10 +74,36 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             elif "bytes" in message:
                 # Mensaje binario (frames de video)
                 if client_id == "esp32":
-                    # Reenviar frames de video a todos los clientes web
                     binary_data = message["bytes"]
                     print(f"Recibido frame de video de {client_id}: {len(binary_data)} bytes")
-                    
+
+                    # --- GRABACIÓN DE VIDEO ---
+                    # Decodificar el frame JPEG a imagen
+                    np_arr = np.frombuffer(binary_data, np.uint8)
+                    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        # Redimensionar si es necesario
+                        frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
+                        if recording_start_time is None:
+                            recording_start_time = datetime.now()
+                            # Nombre de archivo con timestamp
+                            filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".avi"
+                            filepath = os.path.join(RECORDINGS_DIR, filename)
+                            # Inicializar VideoWriter
+                            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                            video_writer = cv2.VideoWriter(filepath, fourcc, FPS, (FRAME_WIDTH, FRAME_HEIGHT))
+                            print(f"Iniciando grabación: {filepath}")
+                        # Escribir frame
+                        video_writer.write(frame)
+                        # Verificar si pasaron 5 minutos
+                        if (datetime.now() - recording_start_time).total_seconds() >= RECORD_INTERVAL:
+                            video_writer.release()
+                            print(f"Video guardado: {filepath}")
+                            recording_start_time = None
+                            video_writer = None
+                    else:
+                        print("Error al decodificar el frame JPEG")
+                    # --- FIN GRABACIÓN DE VIDEO ---
                     # Reenviar a todos los clientes web (excluir ESP32)
                     for cid, client_ws in connected_clients.items():
                         if cid != "esp32" and cid.startswith("web_"):
@@ -77,6 +122,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         if client_id in connected_clients:
             del connected_clients[client_id]
             print(f"Cliente {client_id} desconectado")
+        if client_id == "esp32" and video_writer is not None:
+            video_writer.release()
+            print("Grabación finalizada por desconexión del ESP32.")
+            video_writer = None
+            recording_start_time = None
 
 # Mount static files
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
