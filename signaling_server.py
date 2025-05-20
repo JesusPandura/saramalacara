@@ -171,10 +171,11 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     local_ip = get_local_ip()
+    railway_url = os.environ.get("RAILWAY_URL", "https://TU-APP.up.railway.app")
     print(f"\n=== Servidor de señalización iniciado ===")
     print(f"IP Local: {local_ip}")
-    print(f"URL para navegador: https://clever-koi-freely.ngrok-free.app")
-    print(f"URL para ESP32: wss://clever-koi-freely.ngrok-free.app/ws/esp32")
+    print(f"URL para navegador: {railway_url}")
+    print(f"URL para ESP32: wss://{railway_url.replace('https://', '').replace('http://', '')}/ws/esp32")
     print("=====================================\n")
     port = int(os.environ.get("PORT", 8000))  # Usa el puerto de Railway, o 8000 por defecto
     uvicorn.run(app, host="0.0.0.0", port=port) 
