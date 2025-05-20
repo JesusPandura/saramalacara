@@ -176,5 +176,5 @@ if __name__ == "__main__":
     print(f"URL para navegador: https://clever-koi-freely.ngrok-free.app")
     print(f"URL para ESP32: wss://clever-koi-freely.ngrok-free.app/ws/esp32")
     print("=====================================\n")
-    port = int(os.environ.get("PORT", 8000))  # Usa el puerto de Railway, o 8000 por defecto
+    port = int(os.environ.get("PORT", 8080))  # Usa el puerto de Railway, o 8000 por defecto
     uvicorn.run(app, host="0.0.0.0", port=port) 
