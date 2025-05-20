@@ -40,8 +40,8 @@ B2_APPLICATION_KEY = "005ee92e8483c9d39830366544e0d47e90f22bb957"
 B2_BUCKET_NAME = "videos-escuela"
 
 # === NUEVO: Variables de entorno para URLs ===
-BROWSER_URL = os.environ.get("BROWSER_URL", "https://clever-koi-freely.ngrok-free.app")
-ESP32_URL = os.environ.get("ESP32_URL", "wss://clever-koi-freely.ngrok-free.app/ws/esp32")
+BROWSER_URL = os.environ.get("BROWSER_URL", "https://10.250.12.40")
+ESP32_URL = os.environ.get("ESP32_URL", "wss://10.250.12.40/ws/esp32")
 # ============================================
 
 def get_today_dir():
