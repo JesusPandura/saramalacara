@@ -8,6 +8,7 @@ import os
 import cv2
 import numpy as np
 from datetime import datetime, timedelta
+import b2sdk.v2
 
 def get_local_ip():
     try:
@@ -33,12 +34,36 @@ FRAME_HEIGHT = 480  # Ajusta según tu cámara
 FPS = 15  # Ajusta según tu cámara
 RECORD_INTERVAL = 5 * 60  # 5 minutos en segundos
 
+# Credenciales de Backblaze B2 (puedes moverlas a variables de entorno para mayor seguridad)
+B2_ACCOUNT_ID = "343ca4974772"
+B2_APPLICATION_KEY = "005ee92e8483c9d39830366544e0d47e90f22bb957"
+B2_BUCKET_NAME = "videos-escuela"
+
+def get_today_dir():
+    today_str = datetime.now().strftime("%Y%m%d")
+    today_dir = os.path.join(RECORDINGS_DIR, today_str)
+    if not os.path.exists(today_dir):
+        os.makedirs(today_dir)
+    return today_dir
+
 if not os.path.exists(RECORDINGS_DIR):
     os.makedirs(RECORDINGS_DIR)
 
 video_writer = None
 frames_buffer = []
 recording_start_time = None
+
+def upload_to_b2(filepath, filename):
+    try:
+        info = b2sdk.v2.InMemoryAccountInfo()
+        b2_api = b2sdk.v2.B2Api(info)
+        b2_api.authorize_account("production", B2_ACCOUNT_ID, B2_APPLICATION_KEY)
+        bucket = b2_api.get_bucket_by_name(B2_BUCKET_NAME)
+        with open(filepath, "rb") as f:
+            bucket.upload_bytes(f.read(), filename)
+        print(f"Archivo subido a Backblaze B2: {filename}")
+    except Exception as e:
+        print(f"Error subiendo a Backblaze B2: {e}")
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -88,7 +113,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             recording_start_time = datetime.now()
                             # Nombre de archivo con timestamp
                             filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".avi"
-                            filepath = os.path.join(RECORDINGS_DIR, filename)
+                            # Carpeta del día actual
+                            today_dir = get_today_dir()
+                            filepath = os.path.join(today_dir, filename)
                             # Inicializar VideoWriter
                             fourcc = cv2.VideoWriter_fourcc(*'XVID')
                             video_writer = cv2.VideoWriter(filepath, fourcc, FPS, (FRAME_WIDTH, FRAME_HEIGHT))
@@ -99,6 +126,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         if (datetime.now() - recording_start_time).total_seconds() >= RECORD_INTERVAL:
                             video_writer.release()
                             print(f"Video guardado: {filepath}")
+                            # Subir a Backblaze B2
+                            try:
+                                upload_to_b2(filepath, filename)
+                            except Exception as e:
+                                print(f"Error al subir el video a B2: {e}")
                             recording_start_time = None
                             video_writer = None
                     else:
@@ -125,6 +157,12 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         if client_id == "esp32" and video_writer is not None:
             video_writer.release()
             print("Grabación finalizada por desconexión del ESP32.")
+            # Subir a Backblaze B2 si hay un archivo pendiente
+            try:
+                if 'filepath' in locals() and 'filename' in locals():
+                    upload_to_b2(filepath, filename)
+            except Exception as e:
+                print(f"Error al subir el video a B2: {e}")
             video_writer = None
             recording_start_time = None
 

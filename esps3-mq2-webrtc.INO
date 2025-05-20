@@ -10,10 +10,10 @@
 #define CAMERA_MODEL_ESP32S3_EYE
 
 // PIN del sensor MQ2 (pin que no interfiere con la cámara)
-#define MQ2_PIN 1  // GPIO1 (verificar que no interfiera con otros usos)
+#define MQ2_PIN 2  // GPIO2 (verificar que no interfiera con otros usos)
 
 // LED integrado para alertas visuales (pin puede variar según modelo)
-#define LED_PIN 2  // GPIO2, ajustar si es necesario
+#define LED_PIN 4  // GPIO4, ajustar si es necesario
 
 #include "camera_pins.h"
 
