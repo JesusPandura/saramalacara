@@ -39,11 +39,6 @@ B2_ACCOUNT_ID = "343ca4974772"
 B2_APPLICATION_KEY = "005ee92e8483c9d39830366544e0d47e90f22bb957"
 B2_BUCKET_NAME = "videos-escuela"
 
-# === NUEVO: Variables de entorno para URLs ===
-BROWSER_URL = os.environ.get("BROWSER_URL", "https://10.250.12.40")
-ESP32_URL = os.environ.get("ESP32_URL", "wss://10.250.12.40/ws/esp32")
-# ============================================
-
 def get_today_dir():
     today_str = datetime.now().strftime("%Y%m%d")
     today_dir = os.path.join(RECORDINGS_DIR, today_str)
@@ -176,13 +171,10 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     local_ip = get_local_ip()
-    port = int(os.environ.get("PORT", 8000))  # Usa el puerto de Railway, o 8000 por defecto
-    # === NUEVO: URLs dinámicos ===
-    browser_url = os.environ.get("BROWSER_URL", f"http://{local_ip}:{port}")
-    esp32_url = os.environ.get("ESP32_URL", f"ws://{local_ip}:{port}/ws/esp32")
     print(f"\n=== Servidor de señalización iniciado ===")
     print(f"IP Local: {local_ip}")
-    print(f"URL para navegador: {browser_url}")
-    print(f"URL para ESP32: {esp32_url}")
+    print(f"URL para navegador: https://clever-koi-freely.ngrok-free.app")
+    print(f"URL para ESP32: wss://clever-koi-freely.ngrok-free.app/ws/esp32")
     print("=====================================\n")
+    port = int(os.environ.get("PORT", 8000))  # Usa el puerto de Railway, o 8000 por defecto
     uvicorn.run(app, host="0.0.0.0", port=port) 
