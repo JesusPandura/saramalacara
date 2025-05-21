@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 from datetime import datetime, timedelta
 import b2sdk.v2
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import Query
 
 def get_local_ip():
     try:
@@ -35,8 +37,8 @@ FPS = 15  # Ajusta según tu cámara
 RECORD_INTERVAL = 5 * 60  # 5 minutos en segundos
 
 # Credenciales de Backblaze B2 (puedes moverlas a variables de entorno para mayor seguridad)
-B2_ACCOUNT_ID = "343ca4974772"
-B2_APPLICATION_KEY = "005ee92e8483c9d39830366544e0d47e90f22bb957"
+B2_ACCOUNT_ID = "005343ca49747720000000003"
+B2_APPLICATION_KEY = "K005AIhSJApZN1zRg/4rgHCfyK/RtfI"
 B2_BUCKET_NAME = "videos-escuela"
 
 def get_today_dir():
@@ -166,11 +168,54 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             video_writer = None
             recording_start_time = None
 
-# Mount static files
+# --- NUEVAS APIS PARA BACKBLAZE B2 ---
+
+# Helper para obtener el bucket de B2
+
+def get_b2_bucket():
+    info = b2sdk.v2.InMemoryAccountInfo()
+    b2_api = b2sdk.v2.B2Api(info)
+    b2_api.authorize_account("production", B2_ACCOUNT_ID, B2_APPLICATION_KEY)
+    bucket = b2_api.get_bucket_by_name(B2_BUCKET_NAME)
+    return bucket
+
+@app.get("/api/b2/list")
+def list_b2_files():
+    try:
+        bucket = get_b2_bucket()
+        files = []
+        for file_version, _ in bucket.ls():
+            files.append({
+                "file_name": file_version.file_name,
+                "size": file_version.size,
+                "upload_timestamp": file_version.upload_timestamp
+            })
+        return JSONResponse(content={"files": files})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/api/b2/download")
+def download_b2_file(file_name: str = Query(..., description="Nombre del archivo a descargar")):
+    try:
+        bucket = get_b2_bucket()
+        file_version = bucket.get_file_info_by_name(file_name)
+        b2_file = bucket.download_file_by_name(file_name)
+        return StreamingResponse(
+            b2_file,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename={file_name}"
+            }
+        )
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=404)
+
+# Mover el montaje de archivos estáticos aquí
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
-    local_ip = get_local_ip()
+    # Forzar la IP local a http://127.0.0.1:4040
+    local_ip = "http://127.0.0.1:4040"
     print(f"\n=== Servidor de señalización iniciado ===")
     print(f"IP Local: {local_ip}")
     print(f"URL para navegador: https://clever-koi-freely.ngrok-free.app")
