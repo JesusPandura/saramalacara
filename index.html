@@ -32,7 +32,7 @@
         box-sizing: border-box;
         overflow: hidden;
         background: #000;
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
       }
 
       #status {
@@ -226,7 +226,7 @@
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 30 },
-          aspectRatio: { ideal: 16/9 },
+          aspectRatio: { ideal: 16 / 9 },
           facingMode: "environment",
           quality: { ideal: 0.9 },
         },
@@ -430,7 +430,7 @@
           console.log("Sending detection request to server...");
 
           const response = await fetch(
-            "https://willingly-worthy-pig.ngrok-free.app/detect",
+            "https://clever-koi-freely.ngrok-free.app/detect",
             {
               method: "POST",
               body: formData,
@@ -658,11 +658,11 @@
           desynchronized: true,
           willReadFrequently: false,
         });
-        
+
         // Mejorar la calidad del renderizado
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
-        
+
         return ctx;
       }
     </script>
