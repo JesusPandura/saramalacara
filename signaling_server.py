@@ -214,12 +214,11 @@ def download_b2_file(file_name: str = Query(..., description="Nombre del archivo
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
-    # Forzar la IP local a http://127.0.0.1:4040
-    local_ip = "http://127.0.0.1:4040"
     print(f"\n=== Servidor de señalización iniciado ===")
-    print(f"IP Local: {local_ip}")
-    print(f"URL para navegador: https://clever-koi-freely.ngrok-free.app")
-    print(f"URL para ESP32: wss://clever-koi-freely.ngrok-free.app/ws/esp32")
+    print(f"El servidor está corriendo en Railway.")
+    print(f"Tu URL pública HTTPS será la que te asigne Railway, por ejemplo:")
+    print(f"https://<tu-proyecto>.up.railway.app")
+    print(f"Para WebSocket: wss://<tu-proyecto>.up.railway.app/ws/esp32")
     print("=====================================\n")
-    port = int(os.environ.get("PORT", 8080))  # Usa el puerto de Railway, o 8000 por defecto
-    uvicorn.run(app, host="0.0.0.0", port=port) 
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
